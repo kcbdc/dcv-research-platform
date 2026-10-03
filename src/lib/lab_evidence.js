@@ -2,12 +2,14 @@ import {safeJson,sha256Hex,nowIso} from './util.js';
 import {fitReducedForm} from './empirical.js';
 import {wilson} from './stats.js';
 
+export const LAB_SNAPSHOT_SCHEMA='DCV-LAB-EVIDENCE-2';
 // One indexed project read and one bounded batch, never a query for each person/candidate.
 export async function readLabSnapshot(env,campaign,{force=false}={}){
  const p=await env.DB.prepare('SELECT id,name,status,research_cycle,evidence_revision,reviewer_obs_count,candidate_count,updated_at FROM projects WHERE id=?').bind(campaign.project_id).first();
  if(!p)throw new Error('project_not_found');
- const signature=[p.id,p.research_cycle,p.evidence_revision,p.reviewer_obs_count,p.candidate_count,p.updated_at].join('|');
- if(!force&&campaign.snapshot_signature===signature&&campaign.snapshot_json&&Date.now()-Date.parse(campaign.snapshot_at)<86400000)return safeJson(campaign.snapshot_json);
+ const signature=[LAB_SNAPSHOT_SCHEMA,p.id,p.research_cycle,p.evidence_revision,p.reviewer_obs_count,p.candidate_count,p.updated_at].join('|');
+ const cachedSnapshot=safeJson(campaign.snapshot_json,null);
+ if(!force&&campaign.snapshot_signature===signature&&cachedSnapshot?.schema===LAB_SNAPSHOT_SCHEMA&&Date.now()-Date.parse(campaign.snapshot_at)<86400000)return cachedSnapshot;
  const pid=p.id,cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
  const queries=[
   ['config','SELECT research_question,design_json,constraints_json,benchmark_json,validation_json FROM project_config WHERE project_id=?',[pid]],
@@ -24,7 +26,7 @@ export async function readLabSnapshot(env,campaign,{force=false}={}){
  const limits={candidates:500,episodes:1000,runs:1000,sources:100};
  const truncated=Object.entries(limits).filter(([key,n])=>data[key].length>n).map(([key])=>key);
  for(const [key,n] of Object.entries(limits))data[key]=data[key].slice(0,n);
- const snapshot={schema:'DCV-LAB-EVIDENCE-1',signature,project:p,captured_at:nowIso(),truncated,...data,
+ const snapshot={schema:LAB_SNAPSHOT_SCHEMA,signature,project:p,captured_at:nowIso(),truncated,...data,
   config: data.config[0]||{},human:data.human[0]||{},protocol:data.protocol[0]||{}};
  snapshot.config={research_question:snapshot.config.research_question,design:safeJson(snapshot.config.design_json),constraints:safeJson(snapshot.config.constraints_json),benchmark:safeJson(snapshot.config.benchmark_json),validation:safeJson(snapshot.config.validation_json)};
  snapshot.protocol={hash:snapshot.protocol.protocol_hash,content:safeJson(snapshot.protocol.protocol_json)};

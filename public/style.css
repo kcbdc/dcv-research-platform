@@ -1086,3 +1086,8 @@ html,body,#dashboard,.dcv-shell{width:100%;max-width:100%;min-width:0}
   #computeSection>.col-12:first-child>article .chart-wrap{height:326px!important;min-height:326px!important;padding-bottom:16px!important}
   #computeSection>.col-12:first-child>article #regionCanvas{height:302px!important;min-height:302px!important;max-height:302px!important}
 }
+
+
+/* v0.9.6 · region placeholder safe wrapping */
+#regionCanvas{overflow:visible!important}
+@media(max-width:480px){#computeSection>.col-12:first-child>article #regionCanvas{padding-left:0!important;padding-right:0!important}}

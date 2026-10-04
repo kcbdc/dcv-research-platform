@@ -24,5 +24,5 @@ test('mobile navbar uses bounded grid and hides refresh to prevent horizontal ov
 });
 
 test('current cache buster is applied to all public UI assets',()=>{
-  for(const p of ['/style.css?v=0.9.5','/lab.css?v=0.9.5','/app.js?v=0.9.5','/thesis.js?v=0.9.5']) assert.ok(index.includes(p),p);
+  for(const p of ['/style.css?v=0.9.6','/lab.css?v=0.9.6','/app.js?v=0.9.6','/thesis.js?v=0.9.6']) assert.ok(index.includes(p),p);
 });

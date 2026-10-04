@@ -2,7 +2,7 @@ import {safeJson,sha256Hex,nowIso} from './util.js';
 import {fitReducedForm} from './empirical.js';
 import {wilson} from './stats.js';
 
-export const LAB_SNAPSHOT_SCHEMA='DCV-LAB-EVIDENCE-2';
+export const LAB_SNAPSHOT_SCHEMA='DCV-LAB-EVIDENCE-3';
 // One indexed project read and one bounded batch, never a query for each person/candidate.
 export async function readLabSnapshot(env,campaign,{force=false}={}){
  const p=await env.DB.prepare('SELECT id,name,status,research_cycle,evidence_revision,reviewer_obs_count,candidate_count,updated_at FROM projects WHERE id=?').bind(campaign.project_id).first();
@@ -15,7 +15,7 @@ export async function readLabSnapshot(env,campaign,{force=false}={}){
   ['config','SELECT research_question,design_json,constraints_json,benchmark_json,validation_json FROM project_config WHERE project_id=?',[pid]],
   ['candidates','SELECT id,base_id,candidate_role,pair_seed_key,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator,status,evidence_status,max_regret,objective_score FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY id LIMIT 501',[pid,cycle]],
   ['episodes','SELECT episode_name,year,country,peak_outflow,concentration,digital_adoption,severity,failed,provenance_type,source_note FROM empirical_episodes WHERE project_id=? ORDER BY year,episode_name LIMIT 1001',[pid]],
-  ['human',`SELECT COUNT(*) n,COUNT(DISTINCT NULLIF(participant_hash,'anonymous')) participants,SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate,SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n,SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n FROM reviewer_observations o WHERE project_id=? AND ((SELECT json_extract(validation_json,'$.human_protocol') FROM project_config WHERE project_id=o.project_id) IS NULL OR json_extract(o.context_json,'$.protocol')=(SELECT json_extract(validation_json,'$.human_protocol') FROM project_config WHERE project_id=o.project_id) OR json_extract(o.context_json,'$.protocol') IS NULL)`,[pid]],
+  ['human',`SELECT COUNT(*) n,COUNT(DISTINCT NULLIF(o.participant_hash,'anonymous')) participants,SUM(CASE WHEN (o.ai_correct=1 AND o.human_accept=1) OR (o.ai_correct=0 AND o.human_accept=0) THEN 1 ELSE 0 END) appropriate,SUM(CASE WHEN o.ai_correct=1 THEN 1 ELSE 0 END) correct_n,SUM(CASE WHEN o.ai_correct=0 THEN 1 ELSE 0 END) wrong_n FROM reviewer_observations o WHERE o.project_id=? AND json_extract(o.context_json,'$.protocol')='main_v2' AND json_extract(o.context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(o.context_json,'$.attention_check') AS INTEGER),0)=0 AND COALESCE(CAST(json_extract(o.context_json,'$.quality.trial_eligible') AS INTEGER),0)=1 AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=o.project_id AND q.participant_hash=o.participant_hash AND q.protocol_version='main_v2' AND q.research_cycle=? AND q.evidence_revision=? AND q.severity='EXCLUDE') AND (SELECT COUNT(*) FROM reviewer_trials rt WHERE rt.project_id=o.project_id AND rt.participant_hash=o.participant_hash AND rt.protocol_version='main_v2' AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.status='done')>=30 AND (SELECT COUNT(*) FROM reviewer_trials ra WHERE ra.project_id=o.project_id AND ra.participant_hash=o.participant_hash AND ra.protocol_version='main_v2' AND ra.research_cycle=? AND ra.trial_phase='attention' AND ra.status='done')>=3`,[pid,cycle,rev,cycle,cycle]],
   ['protocol','SELECT protocol_json,protocol_hash FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1',[pid,cycle]],
   ['validation','SELECT validation_type,status,COUNT(*) n FROM validations WHERE project_id=? AND evidence_revision=? GROUP BY validation_type,status',[pid,rev]],
   ['runs','SELECT r.candidate_id,r.phase,r.seed,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,json_remove(r.result_json,\'$.raw.scenarios\',\'$.raw.groups\',\'$.scenario_scores\',\'$.validation_groups\') result_json FROM simulation_runs r JOIN design_candidates dc ON dc.id=r.candidate_id WHERE r.project_id=? AND dc.research_cycle=? ORDER BY r.created_at DESC LIMIT 1001',[pid,cycle]],
@@ -51,8 +51,9 @@ export function diagnoseSnapshot(s){
  if(!s.protocol?.hash)blockers.push('Frozen research protocol missing');
  if(!cs.length)blockers.push('No candidate results');
  if(eps.length<81)blockers.push('Historical panel incomplete (target 81)');
- if(Number(human.participants||0)<30)blockers.push('Fewer than 30 real human participants');
- if(Number(human.correct_n||0)<60||Number(human.wrong_n||0)<60)blockers.push('Human correct/error strata below predeclared minimum');
+ const hv=s.config?.validation||{},minP=Number(hv.min_human_participants||32),minC=Number(hv.min_human_correct_trials||300),minW=Number(hv.min_human_wrong_trials||200);
+ if(Number(human.participants||0)<minP)blockers.push(`Fewer than ${minP} quality-controlled main_v2 human participants`);
+ if(Number(human.correct_n||0)<minC||Number(human.wrong_n||0)<minW)blockers.push('Quality-controlled human correct/error strata below predeclared minimum');
  if(!s.validation?.some(v=>v.validation_type==='human_recompute'&&v.status==='CONFIRM'))blockers.push('Current-revision human recomputation not confirmed');
  if(s.truncated?.length)blockers.push('Snapshot truncated: '+s.truncated.join(', '));
  if(!runChecks.length)blockers.push('Raw simulation aggregates missing for reproduction');

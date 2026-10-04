@@ -6,6 +6,9 @@ import { empiricalReadiness, loadEmpiricalCalibration } from './empirical.js';
 import { latestProtocol } from './rigor.js';
 import { fdicStatus, getFdicReverificationRankings } from './fdic.js';
 import { officialSourceStatus } from './official_sources.js';
+import { assessDoctoralRigorSnapshot } from './doctoral_rigor.js';
+import {replicationStatus} from './replication.js';
+import {assessExternalValidity} from './external_validity.js';
 
 const CLASS_SQL = `CASE
   WHEN c.status='pending' THEN 'unevaluated'
@@ -91,10 +94,10 @@ export async function buildThesisData(env, projectId) {
   const protocol = await latestProtocol(env, projectId);
 
   const candRows = await all(env.DB, `SELECT c.*, ${CLASS_SQL} AS klass FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=?`, [projectId,cycle]);
-  const cands = candRows.map(c => ({ id: c.id, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), base_id:c.base_id,role:c.candidate_role||'exploratory',K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
+  const cands = candRows.map(c => ({ id: c.id, design_key:c.design_key||null, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), base_id:c.base_id,role:c.candidate_role||'exploratory',K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
 
   // simulation_runs 는 한 번만 읽는다(이전: 이 조회 + 단계별 집계 조회로 2회 스캔). decisions 는 단계별 집계용으로 함께 꺼낸다.
-  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.result_json,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates dc ON dc.id=r.candidate_id WHERE r.project_id=? AND dc.research_cycle=? ORDER BY r.created_at`, [projectId,cycle]);
+  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.seed,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.result_json,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates dc ON dc.id=r.candidate_id WHERE r.project_id=? AND dc.research_cycle=? ORDER BY r.created_at`, [projectId,cycle]);
   const best = new Map(), byCandPhase = new Map();
   for (const r of runRows) {
     byCandPhase.set(`${r.candidate_id}|${r.phase}`, r);
@@ -113,9 +116,9 @@ export async function buildThesisData(env, projectId) {
   const cells = [...cellMap.values()].map(e => ({ ...e, share: r4(e.confirmed / e.total) }));
 
   const estimators = levelTable(cands.filter(c=>c.K>=2),'estimator').map(e => {
-    const xs = cands.filter(c => c.estimator === e.level && c.K>=2 && c.metrics);
-    const col = k => r4(avg(xs.map(c => c.metrics[k]).filter(v => v != null)));
-    return { estimator: e.level, n:e.total,k:e.confirmed,p:e.share,total: e.total, confirmed: e.confirmed, share: e.share, lo: e.lo, hi: e.hi, loss_mean: col('loss_mean'), fp_rate: col('fp_rate'), fn_rate: col('fn_rate'), review_burden: col('review_burden'), recovery_time: col('recovery_time') };
+    const planned=cands.filter(c=>c.estimator===e.level&&c.K>=2),xs=planned.filter(c=>c.metrics),confirmedEvaluated=xs.filter(c=>c.klass==='confirmed').length;
+    const q=ci(confirmedEvaluated,xs.length),col=k=>r4(avg(xs.map(c=>c.metrics[k]).filter(v=>v!=null)));
+    return {estimator:e.level,planned_n:planned.length,evaluated_n:xs.length,unevaluated_n:planned.length-xs.length,confirmed_evaluated:confirmedEvaluated,evaluated_share:r4(xs.length?confirmedEvaluated/xs.length:null),evaluated_ci:q,total:e.total,confirmed:e.confirmed,share:e.share,lo:e.lo,hi:e.hi,loss_mean:col('loss_mean'),fp_rate:col('fp_rate'),fn_rate:col('fn_rate'),review_burden:col('review_burden'),recovery_time:col('recovery_time')};
   });
   const finalists = cands.filter(c => c.klass === 'confirmed').sort((a, b) => (a.max_regret ?? 9e9) - (b.max_regret ?? 9e9) || (b.objective_score ?? 0) - (a.objective_score ?? 0)).slice(0, 10);
   const selectedId = appr?.candidate_id || null;
@@ -251,15 +254,20 @@ export async function buildThesisData(env, projectId) {
   // 인간 검토자: reviewer_observations 를 한 번만 스캔한다(이전: 전체 집계 + 신뢰도별 집계로 2회 스캔).
   // (신뢰도 구간 × 참가자)로 묶어 가져오면 행 수는 구간수×참가자수로 줄고, 합계·참가자 수·구간별 값을 모두 여기서 만든다.
   const humanProtocol=content.validation?.human_protocol||null;
-  const humanGroups = await all(env.DB, `SELECT CASE WHEN ? IS NULL OR json_extract(context_json,'$.protocol')=? OR json_extract(context_json,'$.protocol') IS NULL THEN 1 ELSE 0 END eligible, ROUND(ai_confidence,2) confidence, participant_hash ph, CASE WHEN json_extract(context_json,'$.protocol') IS NULL THEN 1 ELSE 0 END legacy_untagged, COUNT(*) n, SUM(response_ms) rt,
+  const humanGroups = await all(env.DB, `SELECT CASE WHEN json_extract(o.context_json,'$.protocol')=? AND json_extract(o.context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(o.context_json,'$.attention_check') AS INTEGER),0)=0 AND COALESCE(CAST(json_extract(o.context_json,'$.quality.trial_eligible') AS INTEGER),0)=1
+      AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=o.project_id AND q.participant_hash=o.participant_hash AND q.protocol_version=? AND q.research_cycle=? AND q.evidence_revision=? AND q.severity='EXCLUDE')
+      AND (SELECT COUNT(*) FROM reviewer_trials rt WHERE rt.project_id=o.project_id AND rt.participant_hash=o.participant_hash AND rt.protocol_version=? AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.status='done')>=30
+      AND (SELECT COUNT(*) FROM reviewer_trials ra WHERE ra.project_id=o.project_id AND ra.participant_hash=o.participant_hash AND ra.protocol_version=? AND ra.research_cycle=? AND ra.trial_phase='attention' AND ra.status='done')>=3
+      THEN 1 ELSE 0 END eligible,
+    ROUND(ai_confidence,2) confidence, participant_hash ph, CASE WHEN json_extract(context_json,'$.protocol') IS NULL OR json_extract(context_json,'$.protocol')='legacy_v1' THEN 1 ELSE 0 END legacy_untagged, COUNT(*) n, SUM(response_ms) rt,
     SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n, SUM(CASE WHEN ai_correct=1 AND human_accept=1 THEN 1 ELSE 0 END) acc_c,
     SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n, SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w,
     SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override,
     SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate
-    FROM reviewer_observations WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, legacy_untagged`, [humanProtocol,humanProtocol,projectId]);
+    FROM reviewer_observations o WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, legacy_untagged`, [humanProtocol||'main_v2',humanProtocol||'main_v2',cycle,rev,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,projectId]);
   const rvRows=humanGroups.filter(r=>Number(r.eligible)===1);
   const cumulativeParticipants=new Set(humanGroups.map(r=>r.ph).filter(p=>p && p!=='anonymous'));
-  const cumulativeTrials=humanGroups.reduce((n,r)=>n+Number(r.n||0),0),legacyUntaggedTrials=humanGroups.filter(r=>Number(r.eligible)===1&&Number(r.legacy_untagged)===1).reduce((n,r)=>n+Number(r.n||0),0);
+  const cumulativeTrials=humanGroups.reduce((n,r)=>n+Number(r.n||0),0),legacyUntaggedTrials=humanGroups.filter(r=>Number(r.legacy_untagged)===1).reduce((n,r)=>n+Number(r.n||0),0);
   const rvT = { n: 0, rt: 0, appropriate: 0, wrong_n: 0, wrong_accept: 0, right_n: 0, right_override: 0 }, rvParticipants = new Set(), confMap = new Map();
   for (const g of rvRows) {
     const n = Number(g.n) || 0; rvT.n += n; rvT.rt += Number(g.rt) || 0; rvT.appropriate += Number(g.appropriate) || 0;
@@ -273,7 +281,7 @@ export async function buildThesisData(env, projectId) {
   const N = k => Number(rvTot?.[k] || 0);
   const byConfidence = confRows.map(e => ({ confidence: Number(e.confidence), n: e.n, correct_n: Number(e.correct_n), wrong_n: Number(e.wrong_n), accept_when_correct: ci(Number(e.acc_c), Number(e.correct_n)), accept_when_wrong: ci(Number(e.acc_w), Number(e.wrong_n)), mean_rt_ms: r4(e.mean_rt) }));
   const reviewer = {
-    n: N('n'), participants: N('participants'), cumulative_participants:cumulativeParticipants.size, cumulative_trials:cumulativeTrials, excluded_trials:cumulativeTrials-N('n'), legacy_untagged_trials:legacyUntaggedTrials, exclusion_note:'명시적으로 다른 인간실험 규약의 기록만 현재 분석에서 제외하며, 규약 태그 도입 전 legacy 무태그 기록은 현재 규약으로 이월합니다.',
+    n: N('n'), participants: N('participants'), cumulative_participants:cumulativeParticipants.size, cumulative_trials:cumulativeTrials, excluded_trials:cumulativeTrials-N('n'), legacy_untagged_trials:legacyUntaggedTrials, exclusion_note:'main_v2 본 실험 중 사전등록 품질기준을 통과한 trial만 주 분석에 사용합니다. legacy_v1·연습·주의확인·과속/지연 trial은 원자료로 보존하되 주 분석에서 제외합니다.',
     arr: ci(N('appropriate'), N('n')), false_accept: ci(N('wrong_accept'), N('wrong_n')), correct_override: ci(N('wrong_n') - N('wrong_accept'), N('wrong_n')), unnecessary_override: ci(N('right_override'), N('right_n')),
     mean_rt_ms: r4(rvTot?.mean_rt), by_confidence: byConfidence, model: safeJson(rmodel?.model_json, null), model_version: rmodel?.version ?? null, model_current:!!rmodel&&Number(rmodel.research_cycle||0)===cycle&&Number(rmodel.evidence_revision||-1)===rev, model_evidence_revision:rmodel?.evidence_revision??null, cluster_bootstrap: safeJson(rmodel?.model_json, null)?.cluster_bootstrap || clusterBootstrapGrouped(rvRows),protocol:humanProtocol||'legacy',participant_distribution:[...rvRows.reduce((m,r)=>m.set(r.ph,(m.get(r.ph)||0)+Number(r.n)),new Map()).values()]
   };
@@ -293,9 +301,18 @@ export async function buildThesisData(env, projectId) {
   const fdic = await fdicStatus(env, projectId);
   fdic.reverification = await getFdicReverificationRankings(env, projectId, {limit:81});
   const official_sources = await officialSourceStatus(env, projectId);
+  const doctoral_rigor = await assessDoctoralRigorSnapshot(env, projectId, {project,content,cands,runRows,protocol});
+  let independent_replication={status:'NOT_STARTED'};try{independent_replication=await replicationStatus(env,projectId);}catch{}
+  const external_validity=await assessExternalValidity(env,projectId);
 
   const jobs = await all(env.DB, `SELECT type,status,COUNT(*) n FROM jobs WHERE project_id=? GROUP BY type,status ORDER BY type,status`, [projectId]);
   const audit = await one(env.DB, `SELECT COUNT(*) n, MIN(created_at) first_at, MAX(created_at) last_at FROM audit_log WHERE project_id=?`, [projectId]);
+  const orphanValidations=await one(env.DB,`SELECT COUNT(*) n FROM validations v WHERE v.project_id=? AND v.candidate_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM design_candidates c WHERE c.id=v.candidate_id AND c.research_cycle=?)`,[projectId,cycle]);
+  const currentValidationIds=await one(env.DB,`SELECT COUNT(DISTINCT v.candidate_id) n FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=?`,[projectId,cycle]);
+  const balanceRows=await all(env.DB,`SELECT estimator,alpha,recovery_w,COUNT(*) n FROM design_candidates WHERE project_id=? AND research_cycle=? AND authority_k>=2 GROUP BY estimator,alpha,recovery_w`,[projectId,cycle]);
+  const balanceCounts=balanceRows.map(x=>Number(x.n||0)),balanced=balanceCounts.length>0&&Math.max(...balanceCounts)-Math.min(...balanceCounts)<=1;
+  const mechanism=await all(env.DB,`SELECT c.authority_k K,c.delay_d d,AVG(r.fn_rate) fn,AVG(r.review_burden) burden,AVG(r.recovery_time) recovery,COUNT(*) n FROM design_candidates c JOIN simulation_runs r ON r.candidate_id=c.id WHERE c.project_id=? AND c.research_cycle=? AND r.phase IN ('confirmation','historical','stress') GROUP BY c.authority_k,c.delay_d ORDER BY c.authority_k,c.delay_d`,[projectId,cycle]);
+  const integrity={orphan_validation_rows:Number(orphanValidations?.n||0),current_validation_candidate_ids:Number(currentValidationIds?.n||0),candidate_count:cands.length,validation_candidate_overlap_rate:cands.length?Number(currentValidationIds?.n||0)/cands.length:0,balanced_factorial:{cells:balanceRows.length,balanced,counts:balanceCounts},mechanism_check:mechanism,status:Number(orphanValidations?.n||0)>0?'WARN':(balanced?'PASS':'WARN')};
   return {
     generated_at: nowIso(), app_version: APP_VERSION,
     project: { id: project.id, name: project.name, description: project.description, status: project.status, stage: project.current_stage, created_at: project.created_at, research_cycle:cycle, evidence_revision:rev, revalidation_from:project.revalidation_from, approval_stale:!!project.approval_stale, last_evidence_at:project.last_evidence_at },
@@ -305,7 +322,7 @@ export async function buildThesisData(env, projectId) {
     selected: selected ? { ...selected, by_phase: selectedByPhase, inference:selectedInference } : null,
     approval: appr ? { decision: appr.decision, evidence_level: appr.evidence_level, automatic: !!appr.automatic, created_at: appr.created_at, basis: safeJson(appr.basis_json, {}) } : null,
     simulation: { phases, scenarios, validations,constraint_diagnostics:[...constraintCounts.values()],validation_revision_counts:validationRevisionCounts }, validation_matrix, survival_funnel, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel, fdic, official_sources },
-    reproducibility: { design_seed: hashString(`${projectId}:design`), protocol: protocol ? {version:protocol.version,hash:protocol.protocol_hash,frozen_at:protocol.frozen_at,status:protocol.status,definition_version:protocol.definition_version} : null, jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
+    integrity, doctoral_rigor, independent_replication, external_validity, reproducibility: { design_seed: hashString(`${projectId}:design`), protocol: protocol ? {version:protocol.version,hash:protocol.protocol_hash,frozen_at:protocol.frozen_at,status:protocol.status,definition_version:protocol.definition_version} : null, jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
   };
 }
 
@@ -334,9 +351,11 @@ export async function exportCsv(env, projectId, name) {
     case 'official_sync_runs': return q(`SELECT connector_id,case_layer,status,fetched_rows,changed_rows,started_at,completed_at,error_text FROM official_source_sync_runs WHERE project_id=? ORDER BY started_at`, ['connector_id','case_layer','status','fetched_rows','changed_rows','started_at','completed_at','error_text']);
     case 'official_mappings': return q(`SELECT connector_id,mapping_key,method_version,period,value_num,components_json,sensitivity_json,updated_at FROM external_validation_metrics WHERE project_id=? ORDER BY mapping_key`, ['connector_id','mapping_key','method_version','period','value_num','components_json','sensitivity_json','updated_at']);
     case 'validation_matrix': return q(`SELECT m.candidate_id,c.estimator,c.sigma,c.alpha,c.authority_k,c.delay_d,m.synthetic_status,m.historical_status,m.adversarial_status,m.bis_status,m.ecb_status,m.human_status,m.overall_status,m.updated_at FROM candidate_validation_matrix m JOIN design_candidates c ON c.id=m.candidate_id WHERE m.project_id=? ORDER BY m.overall_status,c.max_regret,c.authority_k DESC`, ['candidate_id','estimator','sigma','alpha','authority_k','delay_d','synthetic_status','historical_status','adversarial_status','bis_status','ecb_status','human_status','overall_status','updated_at']);
+    case 'external_validity_datasets': return q(`SELECT name,domain,jurisdiction,source_type,actual_public_payment,outcome_ground_truth,independent_source,row_count,data_hash,status,created_at,verified_at,provenance_json FROM external_validity_datasets WHERE project_id=? ORDER BY created_at`, ['name','domain','jurisdiction','source_type','actual_public_payment','outcome_ground_truth','independent_source','row_count','data_hash','status','created_at','verified_at','provenance_json']);
+    case 'external_validity_evaluations': return q(`SELECT e.dataset_id,d.name dataset_name,e.research_cycle,e.candidate_id,e.status,e.n,e.analysis_code_hash,e.result_hash,e.implementation_scope,e.independent_implementation,e.created_at,e.result_json FROM external_validity_evaluations e JOIN external_validity_datasets d ON d.id=e.dataset_id WHERE e.project_id=? ORDER BY e.created_at`, ['dataset_id','dataset_name','research_cycle','candidate_id','status','n','analysis_code_hash','result_hash','implementation_scope','independent_implementation','created_at','result_json']);
     case 'audit_log': return q(`SELECT created_at,actor,action,entity_type,entity_id,detail_json FROM audit_log WHERE project_id=? ORDER BY created_at`, ['created_at', 'actor', 'action', 'entity_type', 'entity_id', 'detail_json']);
     default: return null;
   }
 }
-export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'fdic_links', 'fdic_financials', 'fdic_sod', 'fdic_market_metrics', 'fdic_reverification', 'fdic_reverification_reviews', 'official_observations', 'official_sync_runs', 'official_mappings', 'validation_matrix', 'audit_log'];
+export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'fdic_links', 'fdic_financials', 'fdic_sod', 'fdic_market_metrics', 'fdic_reverification', 'fdic_reverification_reviews', 'official_observations', 'official_sync_runs', 'official_mappings', 'validation_matrix', 'external_validity_datasets', 'external_validity_evaluations', 'audit_log'];
 

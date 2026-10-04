@@ -13,7 +13,7 @@ function metrics(rows){
   const meanDelay=rows.reduce((a,r)=>a+Number(r.response_ms||0),0)/n/1000;
   const recovered=wrong.filter(r=>Number(r.recovered)===1), recoveryTime=recovered.length?recovered.reduce((a,r)=>a+Number(r.recovery_ms||0),0)/recovered.length/1000:null;
   const arr=(correct.filter(r=>Number(r.human_accept)===1).length+wrong.filter(r=>Number(r.human_accept)===0).length)/n;
-  return {n:rows.length,correct_n:correct.length,wrong_n:wrong.length,appropriate_reliance_rate:arr,correct_accept_rate:correctAccept,correct_override_rate:correctOverride,false_accept_rate:falseAccept,unnecessary_override_rate:unnecessaryOverride,mean_delay:meanDelay,error_recovery_time:recoveryTime};
+  return {n:rows.length,correct_n:correct.length,wrong_n:wrong.length,appropriate_reliance_rate:arr,correct_accept_rate:correctAccept,correct_override_rate:correctOverride,false_accept_rate:falseAccept,unnecessary_override_rate:unnecessaryOverride,discrimination_delta:correctAccept-falseAccept,mean_delay:meanDelay,error_recovery_time:recoveryTime};
 }
 function clusterBootstrap(rows,B=300,seed=20260930){
   const groups=new Map(); for(const r of rows){const k=String(r.participant_hash||'anon');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}
@@ -24,7 +24,7 @@ function clusterBootstrap(rows,B=300,seed=20260930){
     draws.push(metrics(sample));
   }
   const interval=k=>{const xs=draws.map(x=>Number(x[k])).filter(Number.isFinite);return{lo:quantile(xs,.025),median:quantile(xs,.5),hi:quantile(xs,.975)};};
-  return {status:'CONFIRM',participants:ids.length,B,seed,ci95:{appropriate_reliance_rate:interval('appropriate_reliance_rate'),false_accept_rate:interval('false_accept_rate'),correct_override_rate:interval('correct_override_rate'),unnecessary_override_rate:interval('unnecessary_override_rate'),mean_delay:interval('mean_delay')}};
+  return {status:'CONFIRM',participants:ids.length,B,seed,ci95:{appropriate_reliance_rate:interval('appropriate_reliance_rate'),false_accept_rate:interval('false_accept_rate'),correct_override_rate:interval('correct_override_rate'),unnecessary_override_rate:interval('unnecessary_override_rate'),discrimination_delta:interval('discrimination_delta'),mean_delay:interval('mean_delay')}};
 }
 
 export function clusterBootstrapGrouped(rows,B=300){
@@ -36,29 +36,47 @@ export function clusterBootstrapGrouped(rows,B=300){
  return {status:'DESCRIPTIVE_ONLY',B,participants:gs.length,ci95,scope:'Participant-resampled descriptive intervals; sample-size gates and design validity are separate'};
 }
 
+
+function sigmoid(x){return x>30?1:x<-30?0:1/(1+Math.exp(-x));}
+function logit(p){p=Math.min(.999,Math.max(.001,Number(p)));return Math.log(p/(1-p));}
+// Penalized random-intercept logistic approximation: accept ~ ai_correct * confidence + (1|participant).
+// Participant intercepts receive an L2 penalty, equivalent to a Gaussian random-effect MAP approximation.
+export function fitMixedLogitApprox(rows,{iterations=220,lambda=4}={}){
+ if(!rows?.length)return {status:'HOLD',method:'penalized_random_intercept_logit_v1',n:0};
+ const ids=[...new Set(rows.map(r=>String(r.participant_hash||'anon')))],u=Object.fromEntries(ids.map(id=>[id,0]));let b=[0,0,0,0];
+ for(let it=0;it<iterations;it++){
+  const gb=[0,0,0,0],gu=Object.fromEntries(ids.map(id=>[id,0])),gn=Object.fromEntries(ids.map(id=>[id,0]));
+  for(const r of rows){const id=String(r.participant_hash||'anon'),c=(Number(r.ai_confidence||.75)-.75)/.2,a=Number(r.ai_correct)===1?1:0,x=[1,a,c,a*c],p=sigmoid(b.reduce((z,v,j)=>z+v*x[j],u[id])),e=Number(r.human_accept)-p;for(let j=0;j<4;j++)gb[j]+=e*x[j];gu[id]+=e;gn[id]++;}
+  const rate=.12/Math.sqrt(1+it/20);for(let j=0;j<4;j++)b[j]+=rate*gb[j]/rows.length;for(const id of ids)u[id]+=rate*gu[id]/Math.max(1,gn[id]+lambda);
+ }
+ const us=Object.values(u),mu=us.reduce((a,x)=>a+x,0)/Math.max(1,us.length),sd=Math.sqrt(us.reduce((a,x)=>a+(x-mu)**2,0)/Math.max(1,us.length));
+ return {status:'CONFIRM',method:'penalized_random_intercept_logit_v1',n:rows.length,participants:ids.length,coefficients:{intercept:b[0],ai_correct:b[1],confidence_z:b[2],ai_correct_x_confidence:b[3]},participant_intercept_sd:sd,confidence_center:.75,confidence_scale:.2,penalty_lambda:lambda,scope:'Operational MAP approximation of the preregistered random-intercept logistic model; confirmatory publication inference should use the exported trial-level data in a full GLMM implementation.'};
+}
 export async function fitReviewerModel(env,projectId){
-  let rows=await all(env.DB,`SELECT * FROM reviewer_observations WHERE project_id=? ORDER BY created_at DESC LIMIT 10000`,[projectId]);
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
-  const def=await latestDefinition(env,projectId),v=def?.content?.validation||{};
-  const lastObserved=rows[0]?.created_at??'';
-  const countBy=new Map(),cap=Math.max(1,Math.min(30,Number(v.max_trials_per_participant||30)));
-  rows=rows.reverse().filter(r=>{const rp=safeJson(r.context_json).protocol||null;if(v.human_protocol&&rp&&rp!==v.human_protocol)return false;const id=r.participant_hash||'anon',n=countBy.get(id)||0;countBy.set(id,n+1);return id!=='anon'&&n<cap;});
-  const minParticipants=Number(v.min_human_participants||30),minCorrect=Number(v.min_human_correct_trials||60),minWrong=Number(v.min_human_wrong_trials||60),B=Math.max(300,Math.min(1000,Number(v.cluster_bootstrap_n||300)));
-  const participantN=new Set(rows.map(r=>String(r.participant_hash||'anon'))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;
+  const def=await latestDefinition(env,projectId),v=def?.content?.validation||{},protocol=String(v.human_protocol||'main_v2');
+  let rows=await all(env.DB,`SELECT * FROM reviewer_observations WHERE project_id=? AND json_extract(context_json,'$.protocol')=? AND json_extract(context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(context_json,'$.attention_check') AS INTEGER),0)=0 ORDER BY created_at`,[projectId,protocol]);
+  const excluded=await all(env.DB,`SELECT DISTINCT participant_hash,flag_code FROM reviewer_quality_flags WHERE project_id=? AND protocol_version=? AND research_cycle=? AND evidence_revision=? AND severity='EXCLUDE'`,[projectId,protocol,Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]);
+  const excludedIds=new Set(excluded.map(x=>String(x.participant_hash)));
+  const completed=await all(env.DB,`SELECT participant_hash,SUM(CASE WHEN trial_phase='main' AND status='done' THEN 1 ELSE 0 END) main_n,SUM(CASE WHEN trial_phase='attention' AND status='done' THEN 1 ELSE 0 END) attention_n FROM reviewer_trials WHERE project_id=? AND protocol_version=? AND research_cycle=? GROUP BY participant_hash HAVING main_n>=? AND attention_n>=?`,[projectId,protocol,Number(p?.research_cycle||1),Number(v.human_main_n||30),Number(v.human_attention_n||3)]);
+  const completedIds=new Set(completed.map(x=>String(x.participant_hash)));
+  rows=rows.filter(r=>completedIds.has(String(r.participant_hash))&&!excludedIds.has(String(r.participant_hash))&&safeJson(r.context_json,{}).quality?.trial_eligible===true);
+  const lastObserved=rows.at(-1)?.created_at??'';
+  const minParticipants=Number(v.min_human_participants||32),minCorrect=Number(v.min_human_correct_trials||300),minWrong=Number(v.min_human_wrong_trials||200),B=Math.max(300,Math.min(1000,Number(v.cluster_bootstrap_n||300)));
+  const participantN=new Set(rows.map(r=>String(r.participant_hash))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;
   const gate={participants:{observed:participantN,required:minParticipants,pass:participantN>=minParticipants},correct_trials:{observed:correctN,required:minCorrect,pass:correctN>=minCorrect},wrong_trials:{observed:wrongN,required:minWrong,pass:wrongN>=minWrong}};
-  const diagnosticCluster=clusterBootstrap(rows,B,20260930);
-  if(!Object.values(gate).every(x=>x.pass)){
-    // 새 관측이 들어오기 전에는 같은 판정이 반복되므로, 마지막으로 본 관측 시각을 기록해 advanceProject 가 재시도하지 않게 한다.
+  const cluster=clusterBootstrap(rows,B,20261004),disc=cluster?.ci95?.discrimination_delta||null;
+  const minDelta=Number(v.human_min_discrimination_delta??.15);gate.discrimination={estimate:metrics(rows).discrimination_delta,ci95:disc,required:`cluster-bootstrap lower bound >= ${minDelta}`,minimum_effect:minDelta,pass:!!disc&&Number(disc.lo)>=minDelta};
+  gate.quality={excluded_participants:excludedIds.size,completed_participants:completedIds.size,protocol,pass:true};
+  if(!Object.values(gate).filter(x=>x&&typeof x==='object'&&'pass'in x).every(x=>x.pass)){
     await run(env.DB,`UPDATE projects SET reviewer_hold_marker=? WHERE id=?`,[lastObserved,projectId]);
-    await audit(env,projectId,'agent','reviewer.fit.hold','project',projectId,{n:rows.length,gate,reason:'human_validation_sample_gate',cluster_bootstrap:diagnosticCluster});
-    return {status:'HOLD',n:rows.length,participants:participantN,gate,cluster_bootstrap:diagnosticCluster};
+    await audit(env,projectId,'agent','reviewer.fit.hold','project',projectId,{n:rows.length,gate,reason:'human_qc_or_discrimination_gate',cluster_bootstrap:cluster});
+    return {status:'HOLD',n:rows.length,participants:participantN,gate,cluster_bootstrap:cluster};
   }
-  const point=metrics(rows),cluster=clusterBootstrap(rows,B,20260930),legacyUntagged=rows.filter(r=>!safeJson(r.context_json).protocol).length,model={...point,participants:participantN,human_protocol:v.human_protocol||null,legacy_untagged_trials:legacyUntagged,last_observed_at:lastObserved,cluster_bootstrap:cluster,sample_gate:gate,unit_of_inference:'participant-cluster bootstrap; repeated trials are not treated as independent participants'};
+  const point=metrics(rows),byConfidence=[...new Set(rows.map(r=>Number(r.ai_confidence)))].sort((a,b)=>a-b).map(confidence=>({confidence,...metrics(rows.filter(r=>Number(r.ai_confidence)===confidence))})),mixed=fitMixedLogitApprox(rows),model={...point,by_confidence:byConfidence,mixed_effects:mixed,participant_accept_sd:Number(mixed.participant_intercept_sd||0),participants:participantN,human_protocol:protocol,last_observed_at:lastObserved,cluster_bootstrap:cluster,sample_gate:gate,quality_control:{fast_ms:Number(v.human_fast_ms||800),slow_ms:Number(v.human_slow_ms||60000),max_fast_share:Number(v.human_max_fast_share||.30),attention_fail_max:Number(v.human_attention_fail_max||1),min_discrimination_delta:Number(v.human_min_discrimination_delta||.15),excluded_participants:excludedIds.size},analysis_plan:'Operational reviewer model fits penalized random-intercept logistic accept ~ ai_correct * confidence + (1|participant), stores confidence-stratified rates, and gates promotion with participant-cluster bootstrap plus a preregistered minimum discrimination effect. Full confirmatory GLMM inference remains reproducible from exported trial-level data.',unit_of_inference:'participant cluster'};
   const ver=await one(env.DB,`SELECT COALESCE(MAX(version),0) v FROM reviewer_models WHERE project_id=?`,[projectId]);
-  const id=uid('reviewermodel'); await run(env.DB,`INSERT INTO reviewer_models(id,project_id,version,model_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?)`,[id,projectId,(ver?.v||0)+1,JSON.stringify(model),nowIso(),Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]);
-  bust(env,projectId,'reviewer:latest');
-  await audit(env,projectId,'agent','reviewer.fit.complete','reviewer_model',id,model);
-  await enqueue(env,projectId,'recompute_project',{},65);
+  const id=uid('reviewermodel');await run(env.DB,`INSERT INTO reviewer_models(id,project_id,version,model_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?)`,[id,projectId,(ver?.v||0)+1,JSON.stringify(model),nowIso(),Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]);
+  bust(env,projectId,'reviewer:latest'); await audit(env,projectId,'agent','reviewer.fit.complete','reviewer_model',id,model); await enqueue(env,projectId,'recompute_project',{},65);
   return {status:'CONFIRM',id,model};
 }
 

@@ -6,9 +6,13 @@ import { cached, bust } from './memo.js';
 
 export async function buildProtocol(env,projectId){
   const def=await latestDefinition(env,projectId); if(!def) throw new Error('definition_missing');
-  const empirical=await empiricalReadiness(env,projectId), cal=await loadEmpiricalCalibration(env,projectId);
-  const design=def.content.design||{}, constraints=def.content.constraints||{}, validation=def.content.validation||{};
+  const design=def.content.design||{}, constraints=def.content.constraints||{}, validation=def.content.validation||{}, benchmark=def.content.benchmark||{};
   const p=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(p?.research_cycle||1);
+  let empirical,cal,replication=null;
+  if(String(benchmark.replication_mode||'')==='independent_replication_v1'){
+    replication=await one(env.DB,`SELECT source_cycle,source_candidate_id,source_design_key,source_protocol_hash,seed_salt,scenario_salt,locked_empirical_json,result_json FROM independent_replications WHERE project_id=? AND replication_cycle=? LIMIT 1`,[projectId,cycle]);if(!replication)throw new Error('replication_snapshot_missing');
+    const snap=safeJson(replication.locked_empirical_json,{});cal=snap.calibration;if(!cal)throw new Error('replication_calibration_snapshot_missing');const eps=Array.isArray(snap.episodes)?snap.episodes:[],target=Number(cal.profile?.panel_n||81);empirical={status:eps.length>=target?'FULL_EPISODE_PANEL':'PARTIAL_EPISODE_PANEL',complete_rows:eps.length,target_rows:target,verified_rows:eps.filter(x=>x.provenance_type==='verified').length};
+  }else{empirical=await empiricalReadiness(env,projectId);cal=await loadEmpiricalCalibration(env,projectId);}
   const candidates=await all(env.DB,`SELECT sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator,base_id,pair_seed_key,candidate_role FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator`,[projectId,cycle]);
   const actualPlan=candidates.map(c=>[Number(c.sigma),Number(c.tau),Number(c.alpha),Number(c.authority_k),Number(c.delay_d),Number(c.recovery_w),Number(c.adjust_m),String(c.estimator),c.base_id||null,c.pair_seed_key||null,c.candidate_role||'exploratory']);
   return {
@@ -19,8 +23,8 @@ export async function buildProtocol(env,projectId){
     constraints,
     estimators:design.estimators||[],
     statistical_plan:{
-      exploration:'adaptive boundary search; not confirmatory',
-      confirmation:'independent deterministic seed family',
+      exploration:benchmark.replication_mode==='independent_replication_v1'?'not applicable: locked-candidate replication':'adaptive boundary search; not confirmatory',
+      confirmation:benchmark.replication_mode==='independent_replication_v1'?'locked candidate; independent seed namespace; preregistered holdout scenario namespace':'independent deterministic seed family',
       multiplicity_method:validation.multiplicity_method||'bonferroni',
       familywise_confidence:Number(validation.familywise_confidence||constraints.confidence||.95),
       family_size:Number(design.max_candidates||128),
@@ -28,6 +32,7 @@ export async function buildProtocol(env,projectId){
       unresolved_rule:'UNRESOLVED is not INFEASIBLE',
       selection_rule:'robust feasibility first; minimax regret second'
     },
+    replication_plan:benchmark.replication_mode==='independent_replication_v1'?{mode:benchmark.replication_mode,source_cycle:Number(benchmark.replication_source_cycle||replication?.source_cycle||0),source_candidate_id:benchmark.replication_source_candidate_id||replication?.source_candidate_id||null,source_design_key:replication?.source_design_key||null,source_protocol_hash:replication?.source_protocol_hash||null,seed_salt_hash:await sha256Hex(String(benchmark.replication_seed_salt||replication?.seed_salt||'')),scenario_salt_hash:await sha256Hex(String(benchmark.replication_scenario_salt||replication?.scenario_salt||'')),scenario_mode:benchmark.replication_scenario_mode||null,snapshot_hash:benchmark.replication_snapshot_hash||safeJson(replication?.result_json,{}).replication_snapshot_hash||null,fresh_human_sample_required:true}:null,
     empirical_anchor:{
       readiness:empirical.status,panel_n:empirical.complete_rows,target_n:empirical.target_rows,verified_n:empirical.verified_rows,
       profile:cal.profile?.version,coefficients:cal.coeff,
@@ -48,7 +53,7 @@ export async function ensureFrozenProtocol(env,projectId){
   if(latest){
     if(latest.protocol_hash===hash) return {...latest,protocol:safeJson(latest.protocol_json,{})};
     // 해시가 달라졌을 때만, 그리고 COUNT(*) 대신 존재 여부(LIMIT 1)만 확인한다.
-    const started=await one(env.DB,`SELECT 1 x FROM simulation_runs WHERE project_id=? AND research_cycle=? LIMIT 1`,[projectId,cycle]);
+    const started=await one(env.DB,`SELECT 1 x FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? LIMIT 1`,[projectId,cycle]);
     if(started) throw new Error('protocol_drift_after_simulation_start');
   }
   const id=uid('protocol'),ts=nowIso();

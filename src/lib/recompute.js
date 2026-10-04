@@ -4,7 +4,7 @@ import { refreshValidationMatrix } from './validation_matrix.js';
 
 export async function enqueueRecompute(env,projectId){
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(p?.research_cycle||1),rev=Number(p?.evidence_revision||0);
-  const confirmed=await all(env.DB,`SELECT DISTINCT v.candidate_id id FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=? AND v.validation_type='robust' AND v.status='CONFIRM' ORDER BY v.candidate_id LIMIT 60`,[projectId,cycle]);
+  const confirmed=await all(env.DB,`SELECT DISTINCT v.candidate_id id FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=? AND v.validation_type='robust' AND v.status='CONFIRM' ORDER BY v.candidate_id LIMIT 500`,[projectId,cycle]);
   await enqueueMany(env,projectId,'compute_candidate',confirmed.map(c=>({candidate_id:c.id,phase:'recompute',cycle:0})),70);   // 루프 안 개별 enqueue → 배치
   await audit(env,projectId,'agent','recompute.queued','project',projectId,{queued:confirmed.length,model:'empirical_reviewer',evidence_revision:rev});
   return{queued:confirmed.length};

@@ -1,7 +1,7 @@
-import {applyRedesign} from './lib/redesign.js';
-import {createHumanTrial,recordHumanTrial} from './lib/human_trials.js';
+import {applyRedesign,applyBalancedRedesign} from './lib/redesign.js';
+import {createHumanTrial,recordHumanTrial,submitHumanQuiz,verifyHumanSession,issueHumanInvite,LEGACY_PROTOCOL} from './lib/human_trials.js';
 import { json, nowIso, uid, safeJson } from './lib/util.js';
-import { requireAdmin } from './lib/auth.js';
+import { requireAdmin, routeAccessClass } from './lib/auth.js';
 import { all, one, run, enqueue, enqueueOnce, audit } from './lib/db.js';
 import { bust } from './lib/memo.js';
 import { processJobs, processFastLane, scheduleAll, advanceProject } from './lib/orchestrator.js';
@@ -18,6 +18,11 @@ import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, bu
 import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus } from './lib/official_sources.js';
 import { getValidationMatrix, refreshValidationMatrix } from './lib/validation_matrix.js';
 import {labApi,scheduleLab} from './lib/lab.js';
+import {calibrateConstraintQuantiles,constraintSensitivityCurve} from './lib/constraint_calibration.js';
+import {assessDoctoralRigor} from './lib/doctoral_rigor.js';
+import {assessExternalValidity,registerExternalValidityDataset,recordExternalValidityEvaluation} from './lib/external_validity.js';
+import {startIndependentReplication,replicationStatus} from './lib/replication.js';
+import {buildReviewerGlmmPackage} from './lib/glmm_export.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -68,11 +73,11 @@ async function cycleStats(env,projectId,cycle){
   ]);
   return {...(fallback[0]?.results?.[0]||{}),...(fallback[1]?.results?.[0]||{})};
 }
-async function humanStats(env,projectId,cycle,humanProtocol=null){
+async function humanStats(env,projectId,cycle,humanProtocol='main_v2'){
   return one(env.DB,`SELECT COALESCE(p.reviewer_obs_count,0) observations,
     (SELECT COUNT(DISTINCT NULLIF(participant_hash,'anonymous')) FROM reviewer_observations WHERE project_id=p.id) participants,
-    (SELECT COUNT(DISTINCT CASE WHEN (? IS NULL OR json_extract(context_json,'$.protocol')=? OR json_extract(context_json,'$.protocol') IS NULL) THEN NULLIF(participant_hash,'anonymous') END) FROM reviewer_observations WHERE project_id=p.id) eligible_participants
-    FROM projects p WHERE p.id=?`,[humanProtocol,humanProtocol,projectId]);
+    (SELECT COUNT(DISTINCT CASE WHEN json_extract(context_json,'$.protocol')=? AND json_extract(context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(context_json,'$.attention_check') AS INTEGER),0)=0 AND COALESCE(CAST(json_extract(context_json,'$.quality.trial_eligible') AS INTEGER),0)=1 THEN NULLIF(participant_hash,'anonymous') END) FROM reviewer_observations WHERE project_id=p.id) eligible_participants
+    FROM projects p WHERE p.id=?`,[humanProtocol||'main_v2',projectId]);
 }
 
 async function storageIntegrity(env,pcols=null,knownProjectCount=null){
@@ -105,6 +110,26 @@ async function compatibleProjectList(env,pcols=null){
 async function api(request,env,ctx=null){
   const url=new URL(request.url), parts=pathParts(request.url), method=request.method.toUpperCase();
   if(url.pathname==='/api/health') return json({ok:true,app:env.APP_NAME||'DCV Research Platform',time:nowIso()});
+  const access=routeAccessClass(parts,method);
+
+  // Participant-facing human-study endpoints are deliberately outside admin auth.
+  // Quiz is the bootstrap step; successful completion issues an opaque session token.
+  if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]&&parts[3]==='reviewer-quiz'&&method==='POST'){
+    try{const b=await bodyJson(request),fp=`${request.headers.get('cf-connecting-ip')||'no-ip'}|${request.headers.get('user-agent')||'no-ua'}`;return json(await submitHumanQuiz(env,parts[2],b.participant_hash,b.answers,b.invite_token,fp),201);}catch(e){return json({error:e.message},400);}
+  }
+  if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]&&parts[3]==='reviewer-trials'&&method==='POST'){
+    const b=await bodyJson(request),hs=request.headers.get('x-human-session')||'';
+    if(!(await verifyHumanSession(env,parts[2],b.participant_hash,hs)))return json({error:'invalid_human_session'},401);
+    try{return json(await createHumanTrial(env,parts[2],b.participant_hash,hs),201);}catch(e){return json({error:e.message},400);}
+  }
+  if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]&&parts[3]==='reviewer-observations'&&method==='POST'){
+    const b=await bodyJson(request);if(!b.trial_id)return json({error:'legacy_path_disabled_use_admin_legacy_endpoint'},410);
+    const hs=request.headers.get('x-human-session')||'';
+    if(!(await verifyHumanSession(env,parts[2],b.participant_hash,hs)))return json({error:'invalid_human_session'},401);
+    try{const saved=await recordHumanTrial(env,parts[2],b,hs);const ev=await registerEvidence(env,parts[2],{kind:'HUMAN_TRIAL',source:'human_qc_main_v2',detail:{observation_id:saved.id}});return json({...saved,revalidation:ev},201);}catch(e){return json({error:e.message},400);}
+  }
+
+  if(access!=='admin') return json({error:'route_access_misclassified'},500);
   const auth=requireAdmin(request,env); if(auth) return auth;
 
   if(url.pathname==='/api/source-presets' && method==='GET') return json({presets:SOURCE_PRESETS,official_connectors:Object.values(OFFICIAL_CONNECTORS)});
@@ -117,7 +142,7 @@ async function api(request,env,ctx=null){
   if(url.pathname==='/api/projects' && method==='POST'){
     const b=await bodyJson(request), id=uid('project'), now=nowIso();
     const design=b.design||{sigma:[0.03,0.05,0.10],tau:[0,1,2],alpha:[0.15,0.35,0.55,0.75],K:[0,1,2,3],d:[0,1,2,4],W:[0.05,0.12,0.22],m:[0.08,0.15,0.25],estimators:['ema','kalman','changepoint','adaptive'],max_candidates:128};
-    const constraints=b.constraints||{loss_max:0.18,loss_exceed_max:0.10,fp_max:0.08,fn_max:0.10,review_burden_max:0.70,recovery_time_max:4.0,confidence:0.95};
+    const constraints=b.constraints||{loss_max:0.18,loss_exceed_max:0.10,fp_max:0.055,fn_max:0.08,review_burden_max:0.30,recovery_time_max:2.5,confidence:0.95,constraint_basis:'queue_v1_exploratory_boundary_targets_v1'};
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects(id,name,description,status,current_stage,auto_run,auto_approve,created_at,updated_at) VALUES(?,?,?,'draft','define',1,1,?,?)`).bind(id,b.name||'DCV 연구 프로젝트',b.description||'',now,now),
       env.DB.prepare(`INSERT INTO project_config(project_id,research_question,design_json,constraints_json,benchmark_json,validation_json) VALUES(?,?,?,?,?,?)`).bind(id,b.research_question||'잡음과 승인 지연 하에서 알고리즘 위임 가능 영역은 어떻게 변화하는가?',JSON.stringify(design),JSON.stringify(constraints),JSON.stringify(b.benchmark||{}),JSON.stringify(b.validation||{}))
@@ -131,7 +156,7 @@ async function api(request,env,ctx=null){
   if(parts[0]==='api' && parts[1]==='projects' && parts[2]){
     const projectId=parts[2];
     if(parts[3]==='redesign'&&method==='POST'){try{return json(await applyRedesign(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:e.message},400);}}
-    if(parts[3]==='reviewer-trials'&&method==='POST'){try{return json(await createHumanTrial(env,projectId,(await bodyJson(request)).participant_hash),201);}catch(e){return json({error:e.message},400);}}
+    if(parts[3]==='rebalance-v2'&&method==='POST'){try{return json(await applyBalancedRedesign(env,projectId),201);}catch(e){return json({error:e.message},400);}}
     if(parts[3]==='lab'){
       try{return await labApi(request,env,projectId,parts);}
       catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:400);}
@@ -199,13 +224,13 @@ async function api(request,env,ctx=null){
       for(const r of rows.slice(0,1000)) stmts.push(env.DB.prepare(`INSERT INTO raw_observations(id,project_id,source_id,observed_at,ingested_at,key,value_num,value_text,payload_json,quality_json) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(uid('obs'),projectId,null,r.observed_at||nowIso(),nowIso(),r.key||'signal',Number.isFinite(Number(r.value))?Number(r.value):null,Number.isFinite(Number(r.value))?null:String(r.value??''),JSON.stringify(r),JSON.stringify({manual:true})));
       if(stmts.length) await env.DB.batch(stmts); const ev=stmts.length?await registerEvidence(env,projectId,{kind:'RAW_OBSERVATION',source:'manual_api',detail:{inserted:stmts.length}}):null; return json({inserted:stmts.length,revalidation:ev});
     }
-    if(parts[3]==='reviewer-observations' && method==='POST'){
-      const b=await bodyJson(request);if(b.trial_id){try{const saved=await recordHumanTrial(env,projectId,b);const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL',source:'calibrated_task_v2',detail:{observation_id:saved.id}});return json({...saved,revalidation:ev},201);}catch(e){return json({error:e.message},400);}} const id=uid('review');
-      await env.DB.batch([   // 관측 INSERT + 프로젝트 카운터 증가를 한 batch(원자적)로
-        env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(b.context||{}),nowIso()),
+    if(parts[3]==='reviewer-observations-legacy' && method==='POST'){
+      const b=await bodyJson(request),id=uid('review'),context={...(b.context||{}),protocol:LEGACY_PROTOCOL,protocol_version:LEGACY_PROTOCOL,legacy_import:true};
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(context),nowIso()),
         env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)`).bind(nowIso(),projectId,id)
       ]);
-      const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL',source:'reviewer_ui',detail:{observation_id:id}}); return json({id,revalidation:ev},201);
+      const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL_LEGACY',source:'admin_legacy_import',detail:{observation_id:id}});return json({id,protocol:LEGACY_PROTOCOL,revalidation:ev},201);
     }
     if(parts[3]==='validation-matrix' && method==='GET'){ return json(await getValidationMatrix(env,projectId)); }
     if(parts[3]==='validation-matrix' && method==='POST'){ return json(await refreshValidationMatrix(env,projectId)); }
@@ -231,6 +256,28 @@ async function api(request,env,ctx=null){
     }
     if(parts[3]==='empirical' && parts[4]==='refit' && method==='POST'){
       const b=await bodyJson(request); return json(await refitEmpiricalCalibration(env,projectId,{promote:!!b.promote}));
+    }
+    if(parts[3]==='doctoral-rigor' && method==='GET'){ return json(await assessDoctoralRigor(env,projectId)); }
+    if(parts[3]==='external-validity' && parts.length===4 && method==='GET'){ return json(await assessExternalValidity(env,projectId)); }
+    if(parts[3]==='external-validity' && parts[4]==='datasets' && method==='POST'){ try{return json(await registerExternalValidityDataset(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:String(e.message||e)},400);} }
+    if(parts[3]==='external-validity' && parts[4]==='evaluations' && method==='POST'){ try{return json(await recordExternalValidityEvaluation(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:String(e.message||e)},400);} }
+    if(parts[3]==='reviewer-glmm-package' && method==='GET'){ return json(await buildReviewerGlmmPackage(env,projectId)); }
+    if(parts[3]==='replication' && method==='GET'){ return json(await replicationStatus(env,projectId)); }
+    if(parts[3]==='replication' && parts[4]==='start' && method==='POST'){ const b=await bodyJson(request); return json(await startIndependentReplication(env,projectId,b),201); }
+    if(parts[3]==='human-invites' && method==='POST'){ const b=await bodyJson(request);if(!b.subject_key)return json({error:'subject_key_required',message:'Use a stable external respondent/recruitment ID; it is hashed server-side and never stored in plaintext.'},400);return json(await issueHumanInvite(env,projectId,{label:b.label||null,subject_key:b.subject_key}),201); }
+    if(parts[3]==='constraint-sensitivity' && method==='GET'){
+      const p=await one(env.DB,`SELECT pr.research_cycle,pc.constraints_json FROM projects pr JOIN project_config pc ON pc.project_id=pr.id WHERE pr.id=?`,[projectId]);if(!p)return json({error:'project_not_found'},404);
+      const cycle=Number(p.research_cycle||1),rows=await all(env.DB,`SELECT r.candidate_id,r.phase,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.created_at FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('exploration','refinement')`,[projectId,cycle]);
+      const result=constraintSensitivityCurve(rows,{baseConstraints:safeJson(p.constraints_json,{})});await audit(env,projectId,'user','constraints.sensitivity.generated','project',projectId,{cycle,candidate_n:result.candidate_n});return json({research_cycle:cycle,...result});
+    }
+    if(parts[3]==='constraint-calibration' && method==='GET'){
+      const p=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]);if(!p)return json({error:'project_not_found'},404);
+      const current=Number(p.research_cycle||1);if(current<=1)return json({error:'no_prior_cycle_for_constraint_calibration'},409);
+      const prior=current-1,rows=await all(env.DB,`SELECT r.phase,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('confirmation','historical','stress')`,[projectId,prior]);
+      return json({source_cycle:prior,...calibrateConstraintQuantiles(rows)});
+    }
+    if(parts[3]==='constraint-calibration' && method==='POST'){
+      return json({error:'quantile_auto_threshold_disabled',message:'Prior-cycle quantiles are exploratory diagnostics only. Use /constraint-sensitivity and freeze externally justified policy/regulatory/SLA thresholds in a new research cycle.'},409);
     }
     if(parts[3]==='candidates' && method==='GET'){
       const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const rows=await all(env.DB,`SELECT c.*, (SELECT status FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' AND v.evidence_revision=? ORDER BY created_at DESC LIMIT 1) final_status FROM design_candidates c WHERE project_id=? AND research_cycle=? ORDER BY sigma,authority_k,delay_d LIMIT 500`,[Number(p?.evidence_revision||0),projectId,Number(p?.research_cycle||1)]); return json({candidates:rows});

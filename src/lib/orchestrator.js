@@ -12,6 +12,7 @@ import { generateReport } from './report.js';
 import { compareStudy } from './crosscase.js';
 import { refitEmpiricalCalibration, seedBundledEmpiricalPanel } from './empirical.js';
 import { approvalGates, registerEvidence } from './evidence.js';
+import {syncReplicationStatus} from './replication.js';
 
 // phase 컬럼(마이그레이션 0007)과 (project_id,type,status,phase) 인덱스로 존재 여부만 확인한다.
 // 이전: 해당 프로젝트의 queued/running 행을 전부 읽어 JS 에서 payload_json 을 파싱.
@@ -24,8 +25,6 @@ async function jobExists(env,projectId,type,phase=null){
 
 // 모든 자동 단계를 마친 프로젝트 상태. 이 상태에서는 Cron 이 15분마다 advance 를 돌려도 읽을 것이 없다.
 const TERMINAL_STATUSES = new Set(['complete','report_ready']);
-const INITIAL_CHECKPOINT_EVALUATED = 100;
-const FOLLOWUP_COMPUTE_BATCH = 20;
 
 async function setStage(env,p,stage){
   if(p.current_stage===stage) return;   // 같은 값이면 쓰기 생략
@@ -62,8 +61,9 @@ export async function advanceProject(env,projectId){
     const ph=String(busy.phase||''); const stage=busy.type==='compute_candidate'?(ph==='historical'||ph==='stress'?'validate':ph==='recompute'?'recompute':'compute'):busy.type==='validate_project'?'validate':'recompute';
     await setStage(env,p,stage); return {stage,waiting:'jobs_in_flight',job_type:busy.type,phase:ph||null};
   }
-  const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
-  const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0), pending=Number(cand?.pending||0), evaluated=Math.max(0,total-pending);
+  const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
+  const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
+  await syncReplicationStatus(env,projectId);
   if(!total){
     const inFlight=await one(env.DB,`SELECT COUNT(*) n FROM jobs WHERE project_id=? AND type IN ('seed_empirical_panel','define_project','collect_project','refit_empirical','measure_project','seed_candidates') AND status IN ('queued','running')`,[projectId]);
     if(Number(inFlight?.n||0)>0){ await setStage(env,p,'measure'); return {stage:'waiting',reason:'setup_jobs_in_flight'}; }
@@ -76,67 +76,14 @@ export async function advanceProject(env,projectId){
 
   // active 후보가 남아 있으면 아직 탐색 중이므로 'unfinished' 작업 조회 없이 바로 반환(조회 1회 절약)
   if(active>0){
-    // Partial-progress checkpoint: do not hold the whole research/report pipeline for the last
-    // unevaluated candidates. Once 100 candidates have a non-pending decision, write an interim
-    // report snapshot first. Thereafter compute only 20 new pending candidates, then refresh the
-    // interim report again. Final validation/approval still runs only after the candidate search
-    // itself is complete, so this accelerates visibility without weakening final gates.
-    if(total>INITIAL_CHECKPOINT_EVALUATED && pending>0 && evaluated>=INITIAL_CHECKPOINT_EVALUATED){
-      const latestCheckpoint=await one(env.DB,`SELECT CAST(json_extract(data_json,'$.summary.evaluated_candidates') AS INTEGER) n
-        FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL
-          AND kind='paper_summary_checkpoint' ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
-      const last=Number(latestCheckpoint?.n||0);
-      const checkpointDue=last<INITIAL_CHECKPOINT_EVALUATED || evaluated>=last+FOLLOWUP_COMPUTE_BATCH || pending===0;
-      if(checkpointDue){
-        const queuedReport=await enqueueOnce(env,projectId,'generate_report',{checkpoint:true,evaluated_candidates:evaluated,pending_candidates:pending},38);
-        await setStage(env,p,'report');
-        return {stage:'checkpoint_report',evaluated,pending,total,queued_report:!!queuedReport,next_batch:FOLLOWUP_COMPUTE_BATCH};
-      }
-    }
-
-    // v0.7.6 exhausted-job recovery:
-    // 이전 구현은 같은 후보의 compute_candidate 실패 이력이 3건 이상이면 그 후보를 영구히 제외했다.
-    // 버그/인프라 장애를 수정해 새 코드를 배포해도 design_candidates.status='pending'은 그대로라
-    // UI가 UNEVALUATED 108 같은 값에서 멈추는 교착이 발생할 수 있었다.
-    // 새 코드 revision마다 가장 최근의 exhausted exploration job을 딱 한 번만 되살린다.
-    // 같은 revision에서 다시 max_attempts를 소진하면 _recovery_revision 표식 때문에 또 되살리지 않아
-    // 결정론적 오류의 무한 재시도는 방지한다.
-    const recoveryRevision=String(env.RUNNER_CODE_REVISION||'unknown');
-    const recoveryTs=new Date().toISOString();
-    const recovered=await run(env.DB,`UPDATE jobs SET status='queued',attempts=0,locked_at=NULL,run_after=?,updated_at=?,
-      last_error='auto_recovered_after_code_revision',
-      payload_json=json_set(COALESCE(payload_json,'{}'),'$._recovery_revision',?)
-      WHERE id IN (
-        SELECT f.id FROM jobs f JOIN design_candidates c ON c.project_id=f.project_id
-          AND c.id=json_extract(f.payload_json,'$.candidate_id')
-        WHERE c.project_id=? AND c.research_cycle=? AND c.status='pending'
-          AND f.type='compute_candidate' AND f.status='failed'
-          AND COALESCE(json_extract(f.payload_json,'$.phase'),'exploration')='exploration'
-          AND COALESCE(json_extract(f.payload_json,'$._recovery_revision'),'')<>?
-          AND NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='exploration')
-          AND NOT EXISTS(SELECT 1 FROM jobs q WHERE q.project_id=c.project_id AND q.type='compute_candidate'
-            AND json_extract(q.payload_json,'$.candidate_id')=c.id AND q.status IN ('queued','running'))
-          AND f.id=(SELECT f2.id FROM jobs f2 WHERE f2.project_id=f.project_id AND f2.type='compute_candidate'
-            AND f2.status='failed' AND json_extract(f2.payload_json,'$.candidate_id')=c.id
-            AND COALESCE(json_extract(f2.payload_json,'$.phase'),'exploration')='exploration'
-            ORDER BY f2.updated_at DESC,f2.created_at DESC LIMIT 1)
-        LIMIT 20
-      )`,[recoveryTs,recoveryTs,recoveryRevision,projectId,cycle,recoveryRevision]);
-    const recoveredCount=Number(recovered?.meta?.changes||0);
-
-    // 과거 실패 횟수 자체는 더 이상 영구 차단 근거로 사용하지 않는다. 현재 코드 revision에서
-    // 이미 한 번 자동복구 후 다시 exhausted 된 후보만 막는다. 새 후보/실패 없는 후보는 즉시 enqueue한다.
+    // Recover missing initial work in bounded batches. Never restart a completed run or retry permanent failures forever.
     const missing=await all(env.DB,`SELECT c.id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='pending'
       AND NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='exploration')
       AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=c.project_id AND j.type='compute_candidate' AND json_extract(j.payload_json,'$.candidate_id')=c.id AND j.status IN ('queued','running'))
-      AND NOT EXISTS(SELECT 1 FROM jobs f WHERE f.project_id=c.project_id AND f.type='compute_candidate'
-        AND json_extract(f.payload_json,'$.candidate_id')=c.id AND f.status='failed'
-        AND json_extract(f.payload_json,'$._recovery_revision')=?)
-      LIMIT 20`,[projectId,cycle,recoveryRevision]);
-    if(recoveredCount||missing.length)await ensureFrozenProtocol(env,projectId);
+      AND (SELECT COUNT(*) FROM jobs f WHERE f.project_id=c.project_id AND f.type='compute_candidate' AND json_extract(f.payload_json,'$.candidate_id')=c.id AND f.status='failed')<3 LIMIT 100`,[projectId,cycle]);
+    if(missing.length)await ensureFrozenProtocol(env,projectId);
     const queued=await enqueueMany(env,projectId,'compute_candidate',missing.map(c=>({candidate_id:c.id,phase:'exploration',cycle:0})),40);
-    await setStage(env,p,'compute');
-    return {stage:'cdrs_boundary_search',active,pending,evaluated,recovered:recoveredCount,queued,total,batch_size:FOLLOWUP_COMPUTE_BATCH,waiting:recoveredCount?'recovered_exhausted_or_missing_jobs':queued?'processing_next_20_candidate_batch':'current_revision_failures_require_inspection'};
+    await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued,total,waiting:queued?'recovered_missing_jobs':'inspect_failed_jobs'};
   }
   const unfinished=await jobExists(env,projectId,'compute_candidate','exploration')||await jobExists(env,projectId,'compute_candidate','refinement')||await jobExists(env,projectId,'compute_candidate','confirmation');
   if(unfinished){ await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued:1,total}; }
@@ -144,9 +91,9 @@ export async function advanceProject(env,projectId){
 
   // 이전: simulation_runs 를 phase 별로 3번, validations 를 3번 — 모두 project_id 인덱스가 없어 전체 스캔.
   // 이후: 커버링 인덱스로 GROUP BY 1회씩.
-  const runAgg=await all(env.DB,`SELECT phase,COUNT(DISTINCT candidate_id) n FROM simulation_runs WHERE project_id=? AND research_cycle=? AND phase IN ('historical','stress') GROUP BY phase`,[projectId,cycle]);
+  const runAgg=await all(env.DB,`SELECT r.phase,COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('historical','stress') GROUP BY r.phase`,[projectId,cycle]);
   const rn=Object.fromEntries(runAgg.map(r=>[r.phase,Number(r.n||0)]));
-  const recomputeNow=await one(env.DB,`SELECT COUNT(DISTINCT candidate_id) n FROM simulation_runs WHERE project_id=? AND research_cycle=? AND phase='recompute' AND evidence_revision=?`,[projectId,cycle,rev]);
+  const recomputeNow=await one(env.DB,`SELECT COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase='recompute' AND r.evidence_revision=?`,[projectId,cycle,rev]);
   rn.recompute=Number(recomputeNow?.n||0);
   if((rn.historical||0)<feasible || (rn.stress||0)<feasible){
     if(!(await jobExists(env,projectId,'compute_candidate','historical')) && !(await jobExists(env,projectId,'compute_candidate','stress'))) await enqueueRobustValidation(env,projectId);
@@ -162,14 +109,6 @@ export async function advanceProject(env,projectId){
     if(!(await jobExists(env,projectId,'validate_project'))) await enqueue(env,projectId,'validate_project',{},55);
     await setStage(env,p,'validate');
     return {stage:'validate'};
-  }
-
-  // Never advance to human fitting when G3 has no confirmed robust candidate.
-  // Older builds could fit a reviewer model directly from HUMAN_TRIAL evidence and display
-  // G4 PASS while G3 was WAIT; G5 then had zero candidates to recompute and stalled.
-  if(robustConfirmed===0){
-    await setStage(env,p,'validate');
-    return {stage:'hold',reason:'no_robust_confirmed_candidates',gate:'G3'};
   }
 
   const reviewer=await one(env.DB,`SELECT id FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
@@ -207,7 +146,7 @@ export async function advanceProject(env,projectId){
     return {stage:'approve'};
   }
 
-  const report=await one(env.DB,`SELECT id FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL AND kind='paper_summary' ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
+  const report=await one(env.DB,`SELECT id FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
   if(!report){
     if(!(await jobExists(env,projectId,'generate_report'))) await enqueue(env,projectId,'generate_report',{},95);
     await setStage(env,p,'report');
@@ -233,10 +172,10 @@ async function execute(env,job){
     case 'advance_project': return advanceProject(env,id);
     case 'validate_project': { const r=await validateProject(env,id); await enqueueOnce(env,id,'advance_project',{},98,5); return r; }
     case 'fit_reviewer': return fitReviewerModel(env,id);   // HOLD 시 자기 재예약(900초 폴링) 제거: 새 관측이 오면 API 가 advance 를 깨운다
-    case 'recompute_project': { const r=await enqueueRecompute(env,id); if(Number(r?.queued||0)===0) await enqueueOnce(env,id,'advance_project',{},98,1); return r; }
+    case 'recompute_project': return enqueueRecompute(env,id);
     case 'finalize_recompute': { const r=await finalizeRecompute(env,id); await enqueueOnce(env,id,'advance_project',{},98,5); return r; }
     case 'approve_project': return approveProject(env,id);
-    case 'generate_report': { const r=await generateReport(env,id,{checkpoint:!!payload.checkpoint}); if(payload.checkpoint) await enqueueOnce(env,id,'advance_project',{},98,1); return r; }
+    case 'generate_report': return generateReport(env,id);
     case 'compare_study': return compareStudy(env,payload.study_id);
     default: throw new Error(`unknown_job:${job.type}`);
   }
@@ -271,17 +210,6 @@ export async function scheduleAll(env,{process=true}={}){
   await run(env.DB,`UPDATE jobs SET priority=90,updated_at=? WHERE type='advance_project' AND status='queued' AND priority<90
     AND EXISTS(SELECT 1 FROM projects p JOIN design_candidates c ON c.project_id=p.id AND c.research_cycle=p.research_cycle
       WHERE p.id=jobs.project_id AND c.status='pending')`,[new Date().toISOString()]);
-  // Deployment-safe batching: older builds may already have queued up to 100 exploration jobs.
-  // Keep only the oldest 20 queued exploration jobs per project; candidates behind them remain
-  // pending and will be re-enqueued by advanceProject after the next checkpoint report.
-  await run(env.DB,`DELETE FROM jobs WHERE id IN (
-    SELECT id FROM (
-      SELECT j.id,ROW_NUMBER() OVER(PARTITION BY j.project_id ORDER BY j.created_at,j.id) rn
-      FROM jobs j JOIN projects p ON p.id=j.project_id
-      WHERE j.type='compute_candidate' AND j.status='queued' AND COALESCE(j.phase,json_extract(j.payload_json,'$.phase'),'exploration')='exploration'
-        AND EXISTS(SELECT 1 FROM design_candidates c WHERE c.project_id=j.project_id AND c.research_cycle=p.research_cycle AND c.status='pending')
-    ) WHERE rn>20
-  )`);
   // 완료된 프로젝트는 대상에서 제외(이전: 모든 auto_run 프로젝트에 15분마다 advance + 데이터소스 집계)
   // Two indexed EXISTS probes inside ONE bounded set query replace N per-project reads.
   const ps=await all(env.DB,`SELECT p.id,
@@ -298,24 +226,12 @@ export async function scheduleAll(env,{process=true}={}){
     if(p.due&&!p.collecting&&!p.pending_compute)await enqueueOnce(env,p.id,'collect_project',{refresh:true},25);
   }
   // Progress reports are available before human/sign-off gates pass; coalesce pending work.
-  let missingReports;
-  try{missingReports=await all(env.DB,`SELECT p.id FROM projects p
-    LEFT JOIN project_cycle_stats pcs ON pcs.project_id=p.id AND pcs.research_cycle=p.research_cycle
-    WHERE p.auto_run=1
+  const missingReports=await all(env.DB,`SELECT p.id FROM projects p WHERE p.auto_run=1
     AND EXISTS(SELECT 1 FROM definitions d WHERE d.project_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM reports r WHERE r.project_id=p.id AND r.research_cycle=p.research_cycle AND r.evidence_revision=p.evidence_revision AND r.stale_at IS NULL
-      AND r.created_at>=COALESCE(pcs.latest_simulation_at,r.created_at))
+      AND r.created_at>=COALESCE((SELECT MAX(sr.created_at) FROM simulation_runs sr JOIN design_candidates dc ON dc.id=sr.candidate_id WHERE sr.project_id=p.id AND dc.research_cycle=p.research_cycle),r.created_at))
     AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='generate_report' AND j.status IN ('queued','running'))
-    ORDER BY p.updated_at,p.id LIMIT 4`);}catch(_){
-    // Compatibility only until migration 0022 is applied. This old path is intentionally
-    // isolated so production switches to the O(1) cycle summary immediately after migration.
-    missingReports=await all(env.DB,`SELECT p.id FROM projects p WHERE p.auto_run=1
-      AND EXISTS(SELECT 1 FROM definitions d WHERE d.project_id=p.id)
-      AND NOT EXISTS(SELECT 1 FROM reports r WHERE r.project_id=p.id AND r.research_cycle=p.research_cycle AND r.evidence_revision=p.evidence_revision AND r.stale_at IS NULL
-        AND r.created_at>=COALESCE((SELECT MAX(sr.created_at) FROM simulation_runs sr WHERE sr.project_id=p.id AND sr.research_cycle=p.research_cycle),r.created_at))
-      AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='generate_report' AND j.status IN ('queued','running'))
-      ORDER BY p.updated_at,p.id LIMIT 4`);
-  }
+    ORDER BY p.updated_at,p.id LIMIT 4`);
   for(const p of missingReports)await enqueueOnce(env,p.id,'generate_report',{},105);
   // 끝난 job 정리는 하루 4회(UTC 0/6/12/18시 첫 Cron)만 — 전용 인덱스를 두면 매 job 상태 변경마다 쓰기가 늘어난다.
   { const t=new Date(); if(t.getUTCHours()%6===0 && t.getUTCMinutes()<15){ try{ await pruneJobs(env); }catch(_){} } }

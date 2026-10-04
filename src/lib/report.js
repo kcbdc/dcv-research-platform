@@ -16,7 +16,7 @@ const EST = { ema: 'EMA', kalman: 'Kalman', changepoint: 'Change-point', adaptiv
 const estName = e => EST[e] || e;
 
 export function checklist(t) {
-  const items = [], rv = t.reviewer, pn = t.empirical.panel, c = t.candidates, lc=t.empirical.loss_calibration;
+  const items = [], rv = t.reviewer, pn = t.empirical.panel, c = t.candidates, lc=t.empirical.loss_calibration, dr=t.doctoral_rigor, rep=t.independent_replication, ev=t.external_validity;
   const minP=Number(t.definition.content?.validation?.min_human_participants||30);
   if (rv.participants < minP) items.push(`현재 인간실험 규약의 참가자가 ${rv.participants}명으로 사전 기준 ${minP}명에 미달합니다${rv.cumulative_participants!=null?`(누적 ${rv.cumulative_participants}명)`:''}. 반복 trial 수가 많아도 참가자 수를 대체하지 못합니다.`);
   if (!rv.cluster_bootstrap?.B) items.push('반복측정 인간실험의 참가자-군집 bootstrap 불확실성 추정이 아직 없습니다.');
@@ -25,7 +25,12 @@ export function checklist(t) {
   if(c.by_class.unevaluated)items.push(`미평가 후보 ${c.by_class.unevaluated}개: 연산 완료 전 진행 보고서이며 최종 연구결과가 아닙니다.`);
   if (!c.by_class.confirmed) items.push(c.by_class.unevaluated===c.total && c.total>0?'모든 후보가 미평가입니다. CONFIRMED 0은 제약 위반의 결과가 아니라 계산 대기 상태입니다. Actions의 compute_candidate 실행 및 저장 결과를 확인해야 합니다.':'CONFIRMED 후보가 없습니다. 계산된 후보의 제약별 판정과 미평가·보류 수를 먼저 확인하십시오.');
   if (!t.reproducibility.protocol?.hash) items.push('확증 분석 전에 동결된 연구 프로토콜 해시가 없습니다.');
+  if(dr&&!dr.hard_pass) items.push(`박사과정 연구엄밀성 HARD gate가 ${dr.hard_passed}/${dr.hard_total}만 통과했습니다: ${dr.checks.filter(x=>x.level==='HARD'&&!x.pass).map(x=>x.id).join(', ')}.`);
+  if(!rep||rep.status==='NOT_STARTED') items.push('독립 replication cycle이 아직 시작되지 않았습니다. 최종 후보·제약·프로토콜을 동결한 뒤 새로운 seed/scenario namespace와 새로운 인간표본으로 재현하십시오.');
+  else if(!['COMPUTATIONALLY_REPLICATED','SCIENTIFICALLY_REPLICATED'].includes(rep.status)) items.push(`독립 replication cycle 상태가 ${rep.status}입니다. replication 결과가 확정되기 전에는 탐색/확증 결과의 외적 재현성을 주장하지 마십시오.`);
   if (lc?.identification_status==='PROXY_ONLY') items.push('FP/FN 비용은 직접 관측된 사회적 비용이 아니라 peak-outflow 기반 경험적 proxy입니다. 직접 비용 추정치로 표현하지 마십시오.');
+  if(ev?.claim_guard==='INTERNAL_ONLY') items.push('외부 타당도 게이트가 INTERNAL_ONLY입니다. 실제 공공 지급결제 결과에 대한 외적 타당성이나 정책 일반화를 주장하지 마십시오.');
+  else if(ev?.claim_guard==='CONTEXT_ONLY') items.push('Case B 공공 지급결제 자료는 현재 맥락·환경 공변량 수준입니다. 지급정지/부정수급 결과 라벨 기반 외적 검증으로 표현하지 마십시오.');
   if (t.approval?.decision==='COMPUTATIONALLY_CONFIRMED') items.push('플랫폼의 자동 판정은 계산적 확인(COMPUTATIONALLY_CONFIRMED)입니다. 최종 학술적 승인에는 PI/심사자 수동 sign-off가 필요합니다.');
   items.push('위임 가능 영역은 명시된 제약·시나리오·설계공간에 조건부인 결과입니다. 인과효과나 보편적 정책 임계값으로 확대 해석하지 마십시오.');
   items.push('AI가 작성한 문장(요약·논의)은 초안입니다. 수치는 표와 D1 실행기록을 기준으로 직접 대조하십시오.');
@@ -55,7 +60,7 @@ function fallbackNarrative(t) {
     top?.share > 0 ? `추정기별로는 ${estName(top.estimator)}의 위임 가능 비율이 ${pct(top.share)}로 가장 높았다(표 6). 다만 후보 수가 추정기마다 제한적이므로 신뢰구간의 폭을 함께 고려해야 한다.` : '',
     `현재 τ 수준은 ${[...new Set(c.list.map(x=>x.tau))].join(', ')}, d 수준은 ${[...new Set(c.list.map(x=>x.d))].join(', ')}이다. 한 수준뿐이면 해당 지연의 효과와 상호작용은 식별할 수 없다. K0/K1은 정의상 전량 검토이므로 B 상한이 1 미만일 때의 탈락은 실증 발견이 아니다. 추정기별 주변 비율은 신뢰도 정의와 base 공변량 차이에 조건부이며, 동일 환경의 신뢰도 절제 결과와 교정오차를 함께 확인해야 한다.`,
     `σ와 α의 상호작용은 그림 1과 표 5에 나타난 바와 같이 정보오차가 커질수록 위임 가능 비율이 어떻게 달라지는지를 보여 준다.`,
-    rv.n ? `인간 관측의 표본은 ${rv.participants}명으로, 30명 기준 ${rv.participants>=30?'충족':'미달'}이다. 기록에서 AI 오답 수용률은 AI 오답 수용률은 ${pct(rv.false_accept.p)}, 정정 개입률은 ${pct(rv.correct_override.p)}였다. 이 비율을 시뮬레이션에 실제 반영했는지는 현재 revision의 검토자 모델과 재계산 기록으로 확인해야 하며 관측 수만으로 반영을 주장하지 않는다.` : `누적 참가자 ${rv.cumulative_participants||0}명, 기록 ${rv.cumulative_trials||0}건은 보존되어 있다. 현재 인간실험 규약에 적합한 관측이 없어 인간 행동 보정은 대기 중이다.`
+    rv.n ? `인간 관측의 표본은 ${rv.participants}명으로, 30명 기준 ${rv.participants>=30?'충족':'미달'}이다. 기록에서 AI 오답 수용률은 ${pct(rv.false_accept.p)}, 정정 개입률은 ${pct(rv.correct_override.p)}였다. 이 비율을 시뮬레이션에 실제 반영했는지는 현재 revision의 검토자 모델과 재계산 기록으로 확인해야 하며 관측 수만으로 반영을 주장하지 않는다.` : `누적 참가자 ${rv.cumulative_participants||0}명, 기록 ${rv.cumulative_trials||0}건은 보존되어 있다. 현재 인간실험 규약에 적합한 관측이 없어 인간 행동 보정은 대기 중이다.`
   ].filter(Boolean).join(' ');
   return { abstract, discussion, implications: [['COMPUTATIONALLY_CONFIRMED','SCIENTIFICALLY_APPROVED'].includes(decision) ? '제시된 제약과 검증 프로토콜 하에서 위임이 가능한 설계 영역이 존재함을 보였다.' : '현재 증거만으로는 위임 가능 영역을 확정하기 어렵다.', '설계 변수(σ, α, K, d)를 함께 조정해야 위임 경계를 설명할 수 있다.'], next_steps: ['실제 손실함수와 사례별 모수 보정으로 계산 엔진 교체', '검토자 표본 확대와 참가자 간 이질성 분석', '경계 근처 후보의 반복 시드 검증'] };
 }
@@ -70,7 +75,7 @@ export function buildMarkdown(t, ai, sourceNote) {
 
   L.push('## 2. 연구 질문과 설계', '', '### 2.1 연구 질문', '', cleanTex(t.definition.research_question) || '-', '');
   const d = t.design, dimRows = [['σ (정보오차)', d.sigma], ['τ (처리 지연)', d.tau], ['α (정보처리 강도)', d.alpha], ['K (위임 권한)', d.K], ['d (승인 지연)', d.d], ['W (복구규칙)', d.W], ['m (조정)', d.m], ['추정기', (d.estimators || []).map(estName)]].map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : '-']);
-  L.push('### 2.2 설계공간', '', '**표 1. 후보 설계공간**', '', mdTable(['변수', '수준'], dimRows), '', `탐색 후보 수 상한: ${d.max_candidates ?? '-'}. 후보는 설계공간에서 결정적 시드(${t.reproducibility.design_seed})로 추출한 풀에서 maximin(최대 최소거리) 기준으로 선택했다.`, '');
+  L.push('### 2.2 설계공간', '', '**표 1. 후보 설계공간**', '', mdTable(['변수', '수준'], dimRows), '', `탐색 후보 수 상한: ${d.max_candidates ?? '-'}. 설계 방식은 **${d.design_mode||'legacy'}**이다. balanced_factorial_v2에서는 추정기×α×W를 완전요인으로 구성하고 동일 nuisance block(σ·τ·K·d·m) 안에서 균형 비교한다. 결정적 설계 시드: ${t.reproducibility.design_seed}.`, '');
   const cs = t.constraints;
   L.push('### 2.3 제약조건', '', '**표 2. 위임 가능 판정 제약조건**', '', mdTable(['제약', '값'], [['평균 손실 상한', cs.loss_max], ['손실 초과율 상한', cs.loss_exceed_max], ['정지 오판(FP: 정상지급 차단) 상한', cs.fp_max], ['정지 누락(FN: 부정지급·유출) 상한', cs.fn_max], ['검토 부담 상한', cs.review_burden_max], ['복구시간 상한', cs.recovery_time_max], ['신뢰수준', cs.confidence]]), '');
   const rp=t.reproducibility.protocol, inf=t.selected?.inference;
@@ -103,7 +108,7 @@ export function buildMarkdown(t, ai, sourceNote) {
   L.push('### 4.2 위임 가능 영역', '', `설계 후보 ${c.total}개 중 CONFIRMED ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)}), UNEVALUATED ${c.by_class.unevaluated || 0}개, BOUNDARY ${c.by_class.boundary || 0}개, INFEASIBLE ${c.by_class.infeasible || 0}개${c.by_class.provisional ? `, 잠정 ${c.by_class.provisional}개` : ''}로 분류되었다.`, figLine(1));
   const lv = (k, n) => c.dims[k].map(e => [n, e.level, e.total, e.confirmed, cip(e)]);
   L.push('### 4.3 설계 변수별 위임 가능 비율', '', '**표 5. 변수 수준별 CONFIRMED 비율 (95% Wilson 구간)**', '', mdTable(['변수', '수준', '후보 수', 'CONFIRMED', '비율 [95% CI]'], [...lv('sigma', 'σ'), ...lv('tau', 'τ'), ...lv('alpha', 'α'), ...lv('K', 'K'), ...lv('d', 'd'), ...lv('W', 'W'), ...lv('m', 'm')]), '', '> 주의: 수준별 비율은 다른 변수를 통제하지 않은 주변(marginal) 비율이며 인과효과가 아니다.', '');
-  L.push('### 4.4 추정기 비교', '', '**표 6. 추정기별 성능 (K2/K3 후보 평균; K0/K1 점검 기준선 제외)**', '', mdTable(['추정기', '후보 수', 'CONFIRMED', '비율 [95% CI]', '평균 손실', 'FP(정지 오판)', 'FN(정지 누락)', '검토부담', '복구시간'], c.estimators.map(e => [estName(e.estimator), e.total, e.confirmed, cip(e), f(e.loss_mean), f(e.fp_rate), f(e.fn_rate), f(e.review_burden), f(e.recovery_time)])), '', figLine(2));
+  L.push('### 4.4 추정기 비교', '', '**표 6. 추정기별 성능 (K2/K3 후보 평균; K0/K1 점검 기준선 제외)**', '', mdTable(['추정기','계획 n','평가 완료 n','미평가 n','CONFIRMED/평가완료','평가완료 기준 비율 [95% CI]','평균 손실','FP','FN','검토부담','복구시간'], c.estimators.map(e => [estName(e.estimator),e.planned_n,e.evaluated_n,e.unevaluated_n,e.confirmed_evaluated, e.evaluated_n?`${pct(e.evaluated_share)} [${pct(e.evaluated_ci?.lo)}, ${pct(e.evaluated_ci?.hi)}]`:'N/A',f(e.loss_mean),f(e.fp_rate),f(e.fn_rate),f(e.review_burden),f(e.recovery_time)])), '', figLine(2));
   L.push('### 4.5 최종 후보군과 Minimax Regret', '', c.finalists.length ? `안전 제약을 통과한 후보 중 최대 후회가 가장 작은 상위 ${c.finalists.length}개를 표 7에 제시한다. 여기서 Minimax Regret은 Historical + Stress(Adversarial + BIS + ECB) 시나리오의 정규화 목적함수 기준이며 Human Recompute 결과는 이 regret 값 자체에 포함되지 않는다.` : 'CONFIRMED 후보가 없어 순위를 제시할 수 없다.', '');
   if (c.finalists.length) L.push('**표 7. 강건 후보 순위 (Minimax Regret 오름차순)**', '', mdTable(['순위', '추정기', 'σ', 'τ', 'α', 'K', 'd', 'W', 'm', 'Max Regret', 'Boundary'], c.finalists.map((x, i) => [i + 1, estName(x.estimator), x.sigma, x.tau, x.alpha, x.K, x.d, x.W, x.m, f(x.max_regret, 4), f(x.boundary_score)])), '', figLine(3));
   if (b) { const ph = Object.entries(b.by_phase); if (ph.length) L.push('### 4.6 선택 후보의 단계별 성능', '', '**표 8. 선택 후보 성능 (단계별)**', '', mdTable(['단계', 'n', '평균 손실', '손실 초과율', 'FP(정지 오판)', 'FN(정지 누락)', '검토부담', '복구시간', 'Regret'], ph.map(([k, v]) => [k, v.n, f(v.loss_mean, 4), f(v.loss_exceed_rate, 4), f(v.fp_rate, 4), f(v.fn_rate, 4), f(v.review_burden, 3), f(v.recovery_time, 3), f(v.regret, 4)])), ''); }
@@ -116,22 +121,37 @@ export function buildMarkdown(t, ai, sourceNote) {
 
   L.push('## 6. 인간 검토자 보정', '');
   if (rv.n) {
-    L.push(`누적 참가자 ${rv.cumulative_participants||rv.participants}명 / 기록 ${rv.cumulative_trials||rv.n}건. 현재 인간실험 규약 분석: 검토자 관측 ${rv.n}건(참가자 ${rv.participants}명), 평균 응답시간 ${f(rv.mean_rt_ms / 1000, 2)}초. 반복 trial을 독립 참가자로 간주하지 않고 참가자 단위 cluster bootstrap 기록은 ${rv.cluster_bootstrap?.B||0}회이다. 0회이면 적용된 구간이 없으며 아래 Wilson 구간은 trial 수준의 기술통계다.${rv.legacy_untagged_trials?` 규약 태그 도입 전 legacy 무태그 관측 ${rv.legacy_untagged_trials}건은 명시적으로 다른 규약이 아닌 경우 현재 규약으로 이월하였다.`:''}`, '', '**표 10. 인간 검토자 행동 모수 (95% Wilson 구간)**', '', mdTable(['지표', '추정치 [95% CI]'], [['적정 의존율 (ARR)', cip(rv.arr)], ['AI 오답 수용률', cip(rv.false_accept)], ['정정 개입률 (AI 오답 개입)', cip(rv.correct_override)], ['불필요 개입률 (AI 정답 개입)', cip(rv.unnecessary_override)]]), '', '**표 11. AI 신뢰도별 수용률**', '', mdTable(['AI 신뢰도', 'n', '실제 정답률', '정답 시 수용', '오답 시 수용', '평균 응답시간(ms)'], rv.by_confidence.map(x => [x.confidence, x.n, pct(x.n?x.correct_n/x.n:null), cip(x.accept_when_correct), cip(x.accept_when_wrong), f(x.mean_rt_ms, 0)])), '', figLine(4));
-  } else L.push(`현재 분석 대상 검토자 관측이 없습니다. 누적 참가자 ${rv.cumulative_participants||0}명 / 관측 ${rv.cumulative_trials||0}건은 보존되어 있습니다. 현재 인간실험 규약에 부합하지 않는 ${rv.excluded_trials||0}건은 분석에서 제외됩니다.`, '');
+    L.push(`누적 참가자 ${rv.cumulative_participants||rv.participants}명 / 기록 ${rv.cumulative_trials||rv.n}건. 현재 인간실험 규약 분석: 검토자 관측 ${rv.n}건(참가자 ${rv.participants}명), 평균 응답시간 ${f(rv.mean_rt_ms / 1000, 2)}초. 반복 trial을 독립 참가자로 간주하지 않고 참가자 단위 cluster bootstrap 기록은 ${rv.cluster_bootstrap?.B||0}회이다. 0회이면 적용된 구간이 없으며 아래 Wilson 구간은 trial 수준의 기술통계다.${rv.legacy_untagged_trials?` legacy/무태그 관측 ${rv.legacy_untagged_trials}건은 원자료로 보존하지만 main_v2 주 분석에는 포함하지 않는다.`:''}`, '', '**표 10. 인간 검토자 행동 모수 (95% Wilson 구간)**', '', mdTable(['지표', '추정치 [95% CI]'], [['적정 의존율 (ARR)', cip(rv.arr)], ['AI 오답 수용률', cip(rv.false_accept)], ['정정 개입률 (AI 오답 개입)', cip(rv.correct_override)], ['불필요 개입률 (AI 정답 개입)', cip(rv.unnecessary_override)]]), '', '**표 11. AI 신뢰도별 수용률**', '', mdTable(['AI 신뢰도', 'n', '실제 정답률', '정답 시 수용', '오답 시 수용', '평균 응답시간(ms)'], rv.by_confidence.map(x => [x.confidence, x.n, pct(x.n?x.correct_n/x.n:null), cip(x.accept_when_correct), cip(x.accept_when_wrong), f(x.mean_rt_ms, 0)])), '', figLine(4));
+  } else L.push(`현재 분석 대상 검토자 관측이 없습니다. 누적 참가자 ${rv.cumulative_participants||0}명 / 관측 ${rv.cumulative_trials||0}건은 보존되어 있습니다. 현재 인간실험 규약에 부합하지 않는 ${rv.excluded_trials||0}건은 분석에서 제외됩니다.${rv.legacy_untagged_trials?` legacy/무태그 관측 ${rv.legacy_untagged_trials}건은 원자료로 보존하지만 main_v2 주 분석에는 포함하지 않습니다.`:''}`, '');
 
   if(rv.n)L.push(`참가자별 관측 수: 최소 ${Math.min(...(rv.participant_distribution||[0]))}, 최대 ${Math.max(...(rv.participant_distribution||[0]))}; 최다 참가자 비중 ${pct(Math.max(...(rv.participant_distribution||[0]))/rv.n)}. 인간 과제 프로토콜: ${rv.protocol||'legacy'}. 통제 과제 신뢰도는 설계상 정답확률이며 실제 AI 성능 추정과 구분한다.`, '', '**참가자 cluster bootstrap 구간 (기술통계)**', '', mdTable(['모수','하한','상한'],Object.entries(rv.cluster_bootstrap?.ci95||{}).map(([k,q])=>[k,f(q.lo),f(q.hi)])), '');
+  const dr=t.doctoral_rigor;
+  if(dr)L.push('## 6B. 박사과정 연구엄밀성 게이트', '', `HARD gate **${dr.hard_passed}/${dr.hard_total}** · Advisory **${dr.advisory_passed}/${dr.advisory_total}**. HARD gate가 모두 통과하기 전에는 COMPUTATIONALLY_CONFIRMED 판정을 허용하지 않는다.`, '', mdTable(['검사','수준','판정','세부'],dr.checks.map(x=>[x.id,x.level,x.pass?'PASS':'HOLD',JSON.stringify(x.detail||{})])), '');
+  const rep=t.independent_replication;
+  if(rep&&rep.status!=='NOT_STARTED')L.push('## 6C. 사전등록 내부 홀드아웃 재표집(Pre-registered Internal Holdout Resampling)', '', `상태 **${rep.status}** · 원 연구 Cycle ${rep.source_cycle} → 홀드아웃 재표집 Cycle ${rep.replication_cycle}. 원 연구에서 선택·서명된 후보를 잠근 뒤 탐색 없이 confirmation부터 재실행한다. 이는 동일 엔진 내부의 사전등록 홀드아웃 재표집이며, 독립 구현·외부 데이터에 의한 외부 재현을 의미하지 않는다.`, '', mdTable(['항목','값'],[['원 후보',rep.source_candidate_id||'-'],['원 design key',rep.source_design_key||'-'],['원 protocol hash',rep.source_protocol_hash||'-'],['재현 protocol hash',rep.replication_protocol_hash||'-'],['새 seed namespace',rep.seed_salt?'locked':'-'],['새 scenario namespace',rep.scenario_salt?'locked':'-'],['새 인간표본',rep.human?`${rep.human.participants}명 / ${rep.human.trials} main trials`:'-'],['재현 판정',rep.approval?.decision||'-']]), '', rep.phases?.length?'**표 10A. 홀드아웃 재표집 실행 요약**':'', rep.phases?.length?mdTable(['단계','run','episode','loss','FP','FN','review','recovery'],rep.phases.map(x=>[x.phase,x.runs,x.episodes,f(x.loss_mean,4),f(x.fp_rate,4),f(x.fn_rate,4),f(x.review_burden,4),f(x.recovery_time,3)])):'', '', rep.comparison?.some(x=>x.delta)?'**표 10B. 원 연구 대비 홀드아웃 재표집 차이(재현−원 연구)**':'', rep.comparison?.some(x=>x.delta)?mdTable(['단계','Δ loss','Δ FP','Δ FN','Δ review','Δ recovery'],rep.comparison.filter(x=>x.delta).map(x=>[x.phase,f(x.delta.loss_mean,4),f(x.delta.fp_rate,4),f(x.delta.fn_rate,4),f(x.delta.review_burden,4),f(x.delta.recovery_time,3)])):'', '');
+
+  const ev=t.external_validity;
+  if(ev)L.push('## 6D. 외부 타당도·주장 범위 게이트', '', `현재 외부 타당도 수준은 **${ev.level}**이다. Case B 공식 관측 ${ev.counts?.case_b_official_rows||0}행, 검증된 실제 공공 지급결제 데이터셋 ${ev.counts?.actual_public_payment_datasets||0}개, 결과 라벨을 가진 데이터셋 ${ev.counts?.outcome_labelled_datasets||0}개, 실제 외부 결과검증 완료 데이터셋 ${ev.counts?.outcome_validated_datasets||0}개다.`, '', mdTable(['항목','값'],[['Claim guard',ev.claim_guard],['공공 지급결제 맥락자료',ev.public_payment_context_available?'있음':'없음'],['결과 라벨 외부검증',ev.outcome_validated?'PASS':'HOLD'],['독립 외부 재현',ev.independent_external_replication?'PASS':'HOLD'],['비고',ev.note||'-']]), '', '**지원 가능한 주장**', '', ...(ev.supports||[]).map(x=>`- ${x}`), '', '**지원하지 않는 주장**', '', ...(ev.does_not_support||[]).map(x=>`- ${x}`), '');
+
+  const integ=t.integrity||{};
+  L.push('## 6A. 자동 정합성·설계 감사', '', `현재 후보 ${integ.candidate_count??0}개 중 validations와 연결된 후보는 ${integ.current_validation_candidate_ids??0}개이며, 현재 후보가 아닌 candidate_id에 붙은 검증 기록은 ${integ.orphan_validation_rows??0}건이다. 이 값이 0보다 크면 과거 후보집합의 검증기록이 남아 있다는 뜻이며 현재 후보의 근거로 사용하지 않는다.`, '', `추정기×α×W 균형설계 상태: **${integ.balanced_factorial?.balanced?'PASS':'WARN'}** (cell ${integ.balanced_factorial?.cells??0}). d와 K 메커니즘 표는 저장된 confirmation/historical/stress 실행에서 직접 계산하며, 효과가 거의 없으면 엔진 단위테스트와 설계 재검토가 필요하다.`, '', integ.mechanism_check?.length?'**표 11A. d·K 메커니즘 진단**':'', integ.mechanism_check?.length?mdTable(['K','d','FN','검토부담','복구시간','n'],integ.mechanism_check.map(x=>[x.K,x.d,f(x.fn,4),f(x.burden,4),f(x.recovery,3),x.n])):'', '');
+
   L.push('## 7. 최종 판정', '', t.approval ? `- 판정: **${t.approval.decision}** (Evidence Level ${t.approval.evidence_level}, ${t.approval.automatic ? '계산 자동판정' : '사람의 학술 승인'}, ${t.approval.created_at})` : '- 판정: 미확정', b ? `- 선택 후보: 추정기 ${estName(b.estimator)}, σ=${b.sigma}, τ=${b.tau}, α=${b.alpha}, K=${b.K}, d=${b.d}, W=${b.W}, m=${b.m}\n- Minimax Regret ${f(b.max_regret, 4)}, Boundary Score ${f(b.boundary_score)}` : '', t.approval?.basis?.selection_rule ? `- 선택 규칙: ${t.approval.basis.selection_rule}` : '', '');
 
 
+  const evScope=t.external_validity||{};
   L.push('## 7A. 주장 범위(Claim Scope Matrix)', '', mdTable(['주장','상태','해석'], [
     ['명시된 제약 하 위임 가능 영역 존재','지원 가능','독립 확인·강건 시나리오·다중비교 보정에 조건부'],
     ['후보 간 상대적 강건성/Minimax Regret','지원 가능','선언된 시나리오 집합 안의 비교 결과'],
+    ['실제 공공 지급결제 환경과의 맥락 정합성',evScope.rank>=1?'지원 가능':'지원하지 않음',evScope.rank>=1?'Case B 공식/검증 데이터의 환경·맥락 수준':'실제 Case B 관측 근거 부족'],
+    ['실제 공공 지급결제 결과에 대한 외적 타당성',evScope.rank>=2?'지원 가능':'지원하지 않음',evScope.rank>=2?'검증된 결과 라벨 데이터와 등록된 외부평가에 한정':'맥락자료만으로 결과 외적 타당성을 주장할 수 없음'],
+    ['독립 외부 재현',evScope.rank>=3?'지원 가능':'지원하지 않음',evScope.rank>=3?'독립 데이터 원천 + 비-DCV 구현 평가가 등록됨':'동일 엔진 내부 홀드아웃은 독립 외부 재현이 아님'],
     ['절대적 위기확률 또는 실제 지급손실 예측','지원하지 않음','현재 모형은 외부 확률예측 모형이 아님'],
     ['FP/FN의 직접 사회적 비용','지원하지 않음','peak-outflow 기반 proxy만 사용'],
     ['위임의 인과효과','지원하지 않음','관측·시뮬레이션 설계로 인과식별하지 않음'],
     ['보편적 최적 임계값','지원하지 않음','사례·제약·시나리오에 조건부']
   ]), '');
-  L.push('## 8. 논의', '', '**본문은 저장된 데이터에 근거한 규칙 기반 분석이며 AI 반복 문장을 사용하지 않는다.**', '', ai.discussion, '', '## 9. 한계 및 타당성 위협', '', ...arr(ai.limitations).map(x => `- ${x}`), '', '## 10. 시사점과 후속 연구', '', ...arr(ai.implications).map(x => `- ${x}`), '', '**후속 연구**', '', ...arr(ai.next_steps).map(x => `- ${x}`), '');
+  L.push('## 8. 논의', '', '**본문의 수치·표·판정은 저장된 데이터에 근거한 규칙 기반 계산이다. AI가 생성한 서술 초안은 별도로 표시하며, 수치 근거를 대체하지 않는다.**', '', ai.discussion, '', '## 9. 한계 및 타당성 위협', '', ...arr(ai.limitations).map(x => `- ${x}`), '', '## 10. 시사점과 후속 연구', '', ...arr(ai.implications).map(x => `- ${x}`), '', '**후속 연구**', '', ...arr(ai.next_steps).map(x => `- ${x}`), '');
 
   L.push('## 부록 B. 재현성 정보', '', mdTable(['항목', '값'], [['플랫폼 버전', t.app_version], ['프로젝트 ID', t.project.id], ['설계 시드', t.reproducibility.design_seed], ['정의 버전', t.definition.version], ['동결 프로토콜 SHA-256', t.reproducibility.protocol?.hash || '-'], ['프로토콜 동결시각', t.reproducibility.protocol?.frozen_at || '-'], ['실증 프로파일', t.empirical.profile], ['검토자 모델 버전', rv.model_version!=null?`v${rv.model_version}${rv.model_current?'':' (현재 Evidence 재적합 대기)'}`:'미생성 (fit_reviewer 대기)'], ['감사 로그', `${t.reproducibility.audit.n}건 (${t.reproducibility.audit.first_at || '-'} ~ ${t.reproducibility.audit.last_at || '-'})`], ['작업 집계', t.reproducibility.jobs.map(j => `${j.type}:${j.status}=${j.n}`).join('; ') || '-']]), '', '---', `요약·논의 생성 방식: ${sourceNote}`, '본 보고서의 표와 그림은 D1에 저장된 실행 기록에서 계산되었습니다. 문장형 요약은 초안이므로 표의 수치와 대조하십시오.', '');
   return L.join('\n');

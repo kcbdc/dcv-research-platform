@@ -100,13 +100,16 @@ function confidenceFor(estState,estimate,threshold,sigma,method='residual_common
   const uncertainty=Math.sqrt(Math.max(EPS,estState.p??estState.var??sigma*sigma));
   return clamp(.5+.5*(1-Math.exp(-distance/(uncertainty+.12))),.5,.999);
 }
-function reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,delayBase,delayMult){
-  const falseAccept=Number(reviewer?.false_accept_rate??.08);
-  const correctOverride=Number(reviewer?.correct_override_rate??.78);
-  const unnecessaryOverride=Number(reviewer?.unnecessary_override_rate??Math.min(.18,falseAccept*.5));
+function reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,delayBase,delayMult,participantEffect=0){
+  const strata=Array.isArray(reviewer?.by_confidence)?reviewer.by_confidence:[];
+  const stratum=strata.length?strata.reduce((best,x)=>Math.abs(Number(x.confidence)-confidence)<Math.abs(Number(best.confidence)-confidence)?x:best,strata[0]):null;
+  const falseAccept=Number(stratum?.false_accept_rate??reviewer?.false_accept_rate??.08);
+  const correctOverride=Number(stratum?.correct_override_rate??reviewer?.correct_override_rate??.78);
+  const unnecessaryOverride=Number(stratum?.unnecessary_override_rate??reviewer?.unnecessary_override_rate??Math.min(.18,falseAccept*.5));
+  const shift=p=>{p=clamp(Number(p),.001,.999);const z=Math.log(p/(1-p))+participantEffect;return 1/(1+Math.exp(-z));};
   let finalStop=aiStop;
-  if(aiStop!==shouldStop){ if(rng()<correctOverride) finalStop=shouldStop; }
-  else if(rng()<unnecessaryOverride) finalStop=!aiStop;
+  if(aiStop!==shouldStop){ if(rng()<shift(correctOverride)) finalStop=shouldStop; }
+  else if(rng()<shift(unnecessaryOverride)) finalStop=!aiStop;
   const base=Math.max(0,Number(delayBase||0))+Math.max(0,Number(reviewer?.mean_delay||0))/86400;
   return {finalStop,delay:Math.max(0,base*delayMult*(.85+.3*rng())),falseAccept,correctOverride};
 }
@@ -117,6 +120,9 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
   const confidenceBins=Array.from({length:10},()=>({n:0,sum:0,correct:0}));
   let state=randn(rng)*.25, reviewN=0, rtSum=0, fp=0,fn=0, decisions=0, totalLoss=0, adjustmentN=0;
   let rollingErrors=0, safeMode=0;
+  // delay_mode='queue_v1': 검토가 필요한 결정은 승인지연 d(일, 시나리오 배율 반영) 뒤에야 집행되고, 그 사이에는 직전 집행 결정이 유지된다(hold-last).
+  // 'legacy_v0'은 과거 사이클 재현용: d가 손실의 가산항으로만 들어간다.
+  const queueMode=(config.delay_mode||'queue_v1')==='queue_v1', approvalQueue=[]; let inForce=false;const participantEffect=Number(reviewer?.participant_accept_sd||0)>0?randn(reviewRng)*Number(reviewer.participant_accept_sd):0;
   for(let t=0;t<horizon;t++){
     const shifted=scenario.shift_time>=0 && t>=scenario.shift_time ? scenario.shift_magnitude : 0;
     const digitalSens=Number(config.empirical?.params?.outflow_digital_sensitivity?.value??0.35),empiricalPulse=Number(scenario.empirical_outflow||0)*(1+digitalSens*Number(scenario.digital||0));
@@ -145,6 +151,15 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
       const hr=reviewerDecision(reviewRng,aiStop,shouldStop,confidence,reviewer,c.delay_d,scenario.delay_multiplier);
       finalStop=hr.finalStop; decisionDelay=hr.delay;
     }
+    if(queueMode){
+      while(approvalQueue.length&&approvalQueue[0].at<=t) inForce=approvalQueue.shift().stop;
+      if(!needsReview) inForce=aiStop;                                        // 자동집행은 즉시 적용
+      else {
+        const lag=Math.max(0,Math.round(Number(c.delay_d||0)*Number(scenario.delay_multiplier||1)));
+        if(lag===0) inForce=finalStop; else approvalQueue.push({at:t+lag,stop:finalStop});   // 대기 결정은 폐기되지 않고 도착 시 낡은 상태 그대로 집행(stale approval)
+      }
+      finalStop=inForce;                                                      // 이후 FP/FN/손실은 '실제 집행된' 결정으로 평가
+    }
     if(finalStop&&!shouldStop) fp++;
     if(!finalStop&&shouldStop) fn++;
     const wrong=finalStop!==shouldStop;
@@ -156,8 +171,8 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
     // FP = 정지 오판(정상지급 차단), FN = 정지 누락(부정지급·유출).
     // 비용은 n=81 위기 패널의 실패/비실패 집단 평균 peak_outflow로 보정한다.
     const decisionLoss=(finalStop&&!shouldStop?cFP:0)+(!finalStop&&shouldStop?cFN:0);
-    const exposure=(!finalStop?cFN*riskExcess*(1+decisionDelay/Math.max(1,T)):0);
-    const delayLoss=(decisionDelay/Math.max(1,T))*(finalStop?cFP:cFN);
+    const exposure=(!finalStop?cFN*riskExcess*(1+(queueMode?0:decisionDelay/Math.max(1,T))):0);
+    const delayLoss=queueMode?0:(decisionDelay/Math.max(1,T))*(finalStop?cFP:cFN);   // queue 모드에서는 지연이 집행 시점 이동으로 이미 반영됨(이중계산 방지)
     let loss=(decisionLoss+exposure+delayLoss)*Number(scenario.loss_multiplier||1);
     if(needsReview) loss+=Number(lossCal.review_cost??cFP/Math.max(1,T));
     totalLoss+=loss; rtSum+=decisionDelay; decisions++;
@@ -193,7 +208,7 @@ function mergeAgg(target,src){
 }
 function finalizeAgg(a,constraints,confidence=.95,inference={},includeGroups=true){
   const nominalZ=confidence>=.99?2.576:confidence>=.95?1.96:1.645;
-  const method=inference.method||'none',familySize=Math.max(1,Number(inference.familySize||1)),constraintCount=Object.keys(PROB_CONSTRAINTS).length+Object.keys(MEAN_CONSTRAINTS).length+(Number.isFinite(constraints.loss_mean_max)?1:0);
+  const method=inference.method||'none',familySize=Math.max(1,Number(inference.familySize||1)),constraintCount=Object.keys(PROB_CONSTRAINTS).length+Object.keys(MEAN_CONSTRAINTS).length+(Number.isFinite(Number(constraints.loss_max??constraints.loss_mean_max))?1:0);
   const alpha=1-confidence,tests=Math.max(1,familySize*constraintCount),adjust=method==='bonferroni'&&inference.adjust===true;
   const z=adjust?normInv(1-alpha/(2*tests)):nominalZ;
   const nE=Math.max(1,a.episodes), nD=Math.max(1,a.decisions);
@@ -207,7 +222,8 @@ function finalizeAgg(a,constraints,confidence=.95,inference={},includeGroups=tru
   const rtCI=normalCI(metrics.recovery_time,rtSd,a.episodes,z);
   const ci={loss_mean:normalCI(metrics.loss_mean,lossSd,a.episodes,z),loss_exceed_rate:lossCI,fp_rate:fpCI,fn_rate:fnCI,review_burden:burdenCI,recovery_time:rtCI};
   const evals=[];
-  if(Number.isFinite(constraints.loss_mean_max))evals.push({metric:'loss_mean',limit:constraints.loss_mean_max,...ci.loss_mean,mean:metrics.loss_mean});
+  const lossLimit=Number(constraints.loss_max??constraints.loss_mean_max);
+  if(Number.isFinite(lossLimit))evals.push({metric:'loss_mean',limit:lossLimit,...ci.loss_mean,mean:metrics.loss_mean});
   for(const [metric,limitKey] of Object.entries(PROB_CONSTRAINTS)){ const q=ci[metric], lim=Number(constraints[limitKey]); evals.push({metric,limit:lim,lo:q.lo,hi:q.hi,mean:metrics[metric]}); }
   for(const [metric,limitKey] of Object.entries(MEAN_CONSTRAINTS)){ const q=ci[metric], lim=Number(constraints[limitKey]); evals.push({metric,limit:lim,lo:q.lo,hi:q.hi,mean:metrics[metric]}); }
   const anyFail=evals.some(x=>x.lo>x.limit), allPass=evals.every(x=>x.hi<=x.limit);
@@ -234,7 +250,7 @@ function applyNoninferiority(ev,candidate,baseline,margins){
 }
 function configFrom(def,env,cal){
   const b=def.content.benchmark||{}, v=def.content.validation||{};
-  return {confidence_method:b.confidence_method||'residual_common_v1',autonomous_delay_days:Number(b.autonomous_delay_days??.02),noninferiority:b.noninferiority||null,horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation||2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
+  return {confidence_method:b.confidence_method||'residual_common_v1',delay_mode:b.delay_mode||'queue_v1',replication_mode:b.replication_mode||null,replication_seed_salt:b.replication_seed_salt||null,replication_scenario_salt:b.replication_scenario_salt||null,replication_scenario_mode:b.replication_scenario_mode||null,autonomous_delay_days:Number(b.autonomous_delay_days??.02),noninferiority:b.noninferiority||null,horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation??2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
 }
 function designDims(d){
   const dims=['sigma','tau','alpha','K','d','W','m'].map(k=>({k,vals:(d[k]&&d[k].length?d[k]:[0]).map(Number)}));
@@ -264,6 +280,67 @@ export function sampleDesign(d,max,seed){
   }
   return chosen;
 }
+
+export function balancedFactorialDesign(d,max=192){
+  const est=(d.estimators||ESTIMATORS).filter(x=>ESTIMATORS.includes(x));
+  const alphas=(d.alpha&&d.alpha.length?d.alpha:[.15,.35,.55,.75]).map(Number);
+  const ws=(d.W&&d.W.length?d.W:[.05,.12,.22]).map(Number);
+  const core=[]; for(const estimator of est)for(const alpha of alphas)for(const W of ws)core.push({estimator,alpha,W});
+  const sigma=(d.sigma?.length?d.sigma:[.03,.05,.10]).map(Number),tau=(d.tau?.length?d.tau:[0,1,2]).map(Number),delays=(d.d?.length?d.d:[0,1,2,4]).map(Number),ms=(d.m?.length?d.m:[.08,.15,.25]).map(Number);
+  const ks=(d.K?.length?d.K:[2,3]).map(Number).filter(x=>x>=2); if(!ks.length)ks.push(2,3);
+  const reps=Math.max(1,Math.min(4,Math.floor(Math.max(core.length,max)/core.length))),out=[];
+  for(let b=0;b<reps;b++){
+    const nuisance={sigma:sigma[b%sigma.length],tau:tau[b%tau.length],K:ks[b%ks.length],d:delays[b%delays.length],m:ms[b%ms.length]};
+    for(const c of core)out.push({...nuisance,...c,base_id:`block_${b+1}`,role:'balanced_factorial'});
+  }
+  return out.slice(0,max);
+}
+
+// ---- orthogonal_balanced_v3 -------------------------------------------------
+// 코어(추정기×α×W) 48셀을 완전교차로 R회 반복하고, nuisance(σ,τ,d,m,K)는 열 내 순열만 바꾸어(주변 균형 보존)
+// 모든 요인쌍의 카이제곱 연관(교락)을 시드 고정 hill-climb로 최소화한다. v2의 '블록 4개' 방식은 σ·τ·m이 완전 동반이동했다.
+function chiPair(a,b,la,lb,n){
+  const t=Array.from({length:la},()=>new Array(lb).fill(0)); for(let i=0;i<n;i++)t[a[i]][b[i]]++;
+  const ra=t.map(r=>r.reduce((x,y)=>x+y,0)), cb=Array.from({length:lb},(_,j)=>t.reduce((x,r)=>x+r[j],0));
+  let chi=0; for(let i=0;i<la;i++)for(let j=0;j<lb;j++){const e=ra[i]*cb[j]/n; if(e>0)chi+=(t[i][j]-e)**2/e;} return chi;
+}
+export function designAudit(rows,factors=['estimator','alpha','W','sigma','tau','d','m','K']){
+  const n=rows.length, levels={}, idx={};
+  for(const f of factors){levels[f]=[...new Set(rows.map(r=>r[f]))].sort((x,y)=>x>y?1:-1); idx[f]=rows.map(r=>levels[f].indexOf(r[f]));}
+  const marginals={}; for(const f of factors){marginals[f]={}; for(const v of levels[f])marginals[f][v]=rows.filter(r=>r[f]===v).length;}
+  const pairs=[]; for(let i=0;i<factors.length;i++)for(let j=i+1;j<factors.length;j++){
+    const f=factors[i],g=factors[j],la=levels[f].length,lb=levels[g].length,chi=chiPair(idx[f],idx[g],la,lb,n),k=Math.min(la,lb)-1;
+    pairs.push({a:f,b:g,cramers_v:k>0?Math.sqrt(chi/(n*k)):0});
+  }
+  const cells=new Set(rows.map(r=>`${r.estimator}|${r.alpha}|${r.W}`));
+  return {n,marginals,pairs,max_cramers_v:Math.max(0,...pairs.map(p=>p.cramers_v)),core_cells:cells.size,core_reps:rows.length/Math.max(1,cells.size)};
+}
+export function orthogonalBalancedDesign(d,max=192,seed=20261004,iterations=30000){
+  const est=(d.estimators||ESTIMATORS).filter(x=>ESTIMATORS.includes(x)), alphas=(d.alpha?.length?d.alpha:[.15,.35,.55,.75]).map(Number), ws=(d.W?.length?d.W:[.05,.12,.22]).map(Number);
+  const sig=(d.sigma?.length?d.sigma:[.03,.05,.10]).map(Number), tau=(d.tau?.length?d.tau:[0,1,2]).map(Number), dd=(d.d?.length?d.d:[0,1,2,4]).map(Number), ms=(d.m?.length?d.m:[.08,.15,.25]).map(Number);
+  const ks=(d.K?.length?d.K:[2,3]).map(Number).filter(x=>x>=2); if(!ks.length)ks.push(2,3);
+  const core=[]; for(const e of est)for(const a of alphas)for(const W of ws)core.push({estimator:e,alpha:a,W});
+  const R=Math.max(1,Math.floor(max/core.length)), n=core.length*R, rng=mulberry32(seed);
+  const rows=[]; for(let r=0;r<R;r++)core.forEach((c,ci)=>rows.push({...c,base_id:`cell_${String(ci+1).padStart(2,'0')}_r${r+1}`,role:'balanced_factorial'}));
+  const nuis={sigma:sig,tau,d:dd,m:ms,K:ks}, names=Object.keys(nuis), cols={};
+  const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;};
+  for(const f of names){cols[f]=shuffle(Array.from({length:n},(_,i)=>i%nuis[f].length));}   // 주변 분포는 (n이 배수일 때) 정확히 균형
+  const fixed={estimator:rows.map(r=>est.indexOf(r.estimator)),alpha:rows.map(r=>alphas.indexOf(r.alpha)),W:rows.map(r=>ws.indexOf(r.W))}, fixedL={estimator:est.length,alpha:alphas.length,W:ws.length};
+  const all=()=>({...fixed,...cols}), L=f=>fixedL[f]??nuis[f].length, facs=[...Object.keys(fixed),...names];
+  const pairCost=(A,f,g)=>chiPair(A[f],A[g],L(f),L(g),n);
+  const total=A=>{let s=0;for(let i=0;i<facs.length;i++)for(let j=i+1;j<facs.length;j++)s+=pairCost(A,facs[i],facs[j]);return s;};
+  const A=all(); let cost=total(A);
+  for(let it=0;it<iterations&&cost>1e-9;it++){
+    const f=names[Math.floor(rng()*names.length)], i=Math.floor(rng()*n), j=Math.floor(rng()*n); if(A[f][i]===A[f][j])continue;
+    let before=0; for(const g of facs)if(g!==f)before+=pairCost(A,f,g);
+    [A[f][i],A[f][j]]=[A[f][j],A[f][i]];
+    let after=0; for(const g of facs)if(g!==f)after+=pairCost(A,f,g);
+    if(after<=before)cost+=after-before; else [A[f][i],A[f][j]]=[A[f][j],A[f][i]];
+  }
+  rows.forEach((r,i)=>{r.sigma=sig[A.sigma[i]];r.tau=tau[A.tau[i]];r.d=dd[A.d[i]];r.m=ms[A.m[i]];r.K=ks[A.K[i]];});
+  return rows.slice(0,max);
+}
+
 export async function seedCandidates(env,projectId){
   const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
   const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]); if(Number(existing?.n||0)>0){
@@ -281,31 +358,44 @@ export async function seedCandidates(env,projectId){
   if(d.grid_source==='operational'&&Number.isFinite(observedSigma)&&observedSigma>0&&Number(mm.numeric_observations||0)>=30)d.sigma=robustGrid(observedSigma,.005,.50,false);
   if(d.grid_source==='operational'&&op.data_latency_days!=null&&Number.isFinite(Number(op.data_latency_days)))d.tau=robustGrid(Number(op.data_latency_days),0,30,true);
   if(d.grid_source==='operational'&&op.approval_delay_days!=null&&Number.isFinite(Number(op.approval_delay_days)))d.d=robustGrid(Number(op.approval_delay_days),0,30,false);
-  const combos=Array.isArray(d.candidate_rows)?d.candidate_rows:sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
-  const rows=combos.map((x,i)=>({...x,id:candIds[i]}));
-  const stmts=[env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at,research_cycle,base_id,candidate_role,pair_seed_key)
-   SELECT json_extract(value,'$.id'),?,json_extract(value,'$.sigma'),json_extract(value,'$.tau'),json_extract(value,'$.alpha'),json_extract(value,'$.K'),json_extract(value,'$.d'),json_extract(value,'$.W'),json_extract(value,'$.m'),'pending',json_extract(value,'$.estimator'),'pending',?,?,?,json_extract(value,'$.base_id'),COALESCE(json_extract(value,'$.role'),'exploratory'),json_extract(value,'$.base_id') FROM json_each(?)`).bind(projectId,now,now,cycle,JSON.stringify(rows))];
+  const maxCandidates=Number(d.max_candidates||192); const combos=Array.isArray(d.candidate_rows)?d.candidate_rows:(d.design_mode==='orthogonal_balanced_v3'?orthogonalBalancedDesign(d,maxCandidates,hashString(`${projectId}:orth`)&0x7fffffff):d.design_mode==='balanced_factorial_v2'?balancedFactorialDesign(d,maxCandidates):sampleDesign(d,maxCandidates,hashString(`${projectId}:design`))); const now=nowIso();
+  const rows=[]; for(const x of combos){ const vec={estimator:x.estimator,sigma:Number(x.sigma),tau:Number(x.tau),alpha:Number(x.alpha),K:Number(x.K),d:Number(x.d),W:Number(x.W),m:Number(x.m)}; const design_key=await sha256Hex(stableStringify(vec)); rows.push({...x,id:uid('cand'),design_key}); } const candIds=rows.map(x=>x.id);
+  const stmts=[env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at,research_cycle,base_id,candidate_role,pair_seed_key,design_key)
+   SELECT json_extract(value,'$.id'),?,json_extract(value,'$.sigma'),json_extract(value,'$.tau'),json_extract(value,'$.alpha'),json_extract(value,'$.K'),json_extract(value,'$.d'),json_extract(value,'$.W'),json_extract(value,'$.m'),'pending',json_extract(value,'$.estimator'),'pending',?,?,?,json_extract(value,'$.base_id'),COALESCE(json_extract(value,'$.role'),'exploratory'),json_extract(value,'$.base_id'),json_extract(value,'$.design_key') FROM json_each(?)`).bind(projectId,now,now,cycle,JSON.stringify(rows))];
   if(rows.length)await env.DB.batch([...stmts,env.DB.prepare('UPDATE projects SET candidate_count=? WHERE id=?').bind(rows.length,projectId)]);
-  await ensureFrozenProtocol(env,projectId);
-  await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:'exploration',cycle:0})),40);
-  await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:rows.length,method:Array.isArray(d.candidate_rows)?'preregistered_paired_csv':'maximin',estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:d.grid_source==='operational'&&op.data_latency_days!=null&&Number.isFinite(Number(op.data_latency_days))?'operational_logs':'declared_design',approval_delay:d.grid_source==='operational'&&op.approval_delay_days!=null&&Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'declared_design'}}); return{created:rows.length};
+  const frozenProtocol=await ensureFrozenProtocol(env,projectId);
+  if(d.design_mode==='independent_replication_v1')try{await run(env.DB,`UPDATE independent_replications SET replication_protocol_hash=? WHERE project_id=? AND replication_cycle=?`,[frozenProtocol?.protocol_hash||null,projectId,cycle]);}catch{}
+  const initialPhase=d.design_mode==='independent_replication_v1'?'confirmation':'exploration';
+  await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:initialPhase,cycle:0})),40);
+  const method=d.design_mode==='independent_replication_v1'?'independent_replication_v1':Array.isArray(d.candidate_rows)?'preregistered_paired_csv':(d.design_mode==='orthogonal_balanced_v3'?'orthogonal_balanced_v3':d.design_mode==='balanced_factorial_v2'?'balanced_factorial_v2':'maximin');
+  await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:rows.length,method,initial_phase:initialPhase,estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:d.grid_source==='operational'&&op.data_latency_days!=null&&Number.isFinite(Number(op.data_latency_days))?'operational_logs':'declared_design',approval_delay:d.grid_source==='operational'&&op.approval_delay_days!=null&&Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'declared_design'}}); return{created:rows.length,initial_phase:initialPhase};
 }
-async function loadScenarios(env,projectId,phase,cal){
+async function loadScenarios(env,projectId,phase,cal,replicationSnapshot=null){
   if(phase==='historical'){
-    const eps=await cached(env,projectId,'scn:episodes',()=>all(env.DB,`SELECT * FROM empirical_episodes WHERE project_id=? AND peak_outflow IS NOT NULL AND concentration IS NOT NULL AND severity IS NOT NULL ORDER BY year,episode_name`,[projectId]));
-    if(eps.length){const full=eps.length>=Number(cal.profile.panel_n||81);return {scenarios:eps.map(r=>({...empiricalScenarioFromEpisode(r,cal),validation_group:'Historical'})),source:full?'empirical_episodes_full':'empirical_episodes_partial',empirical_ready:full,episode_n:eps.length};}
+    const eps=replicationSnapshot?.episodes?.length?replicationSnapshot.episodes.filter(r=>r.peak_outflow!=null&&r.concentration!=null&&r.severity!=null):await cached(env,projectId,'scn:episodes',()=>all(env.DB,`SELECT * FROM empirical_episodes WHERE project_id=? AND peak_outflow IS NOT NULL AND concentration IS NOT NULL AND severity IS NOT NULL ORDER BY year,episode_name`,[projectId]));
+    if(eps.length){const full=eps.length>=Number(cal.profile.panel_n||81);return {scenarios:eps.map(r=>({...empiricalScenarioFromEpisode(r,cal),validation_group:'Historical'})),source:replicationSnapshot?'replication_snapshot_empirical_episodes':(full?'empirical_episodes_full':'empirical_episodes_partial'),empirical_ready:full,episode_n:eps.length};}
     const rows=await cached(env,projectId,'scn:user-historical',()=>all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='historical' ORDER BY name`,[projectId]));
     if(rows.length)return {scenarios:rows.map(r=>({...scenarioFromRow(r,cal),validation_group:'Historical'})),source:'user_historical_scenarios',empirical_ready:false,episode_n:0};
     return {scenarios:syntheticScenarios(cal),source:'published_summary_anchor',empirical_ready:false,episode_n:0};
   }
   if(phase==='stress'){
-    const rows=await cached(env,projectId,'scn:user-adversarial',()=>all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='adversarial' ORDER BY name`,[projectId]));
-    if(rows.length)return {scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:'user_adversarial_scenarios',empirical_ready:true,episode_n:rows.length};
-    const base=paperStressScenarios(cal),boot=calibrationUncertaintyScenarios(cal),loss=lossProxyScenarios(cal),official=await officialValidationScenarios(env,projectId,cal),scenarios=[...base,...boot,...loss,...official];
-    return {scenarios,source:`paper_wide_40pct_grid+calibration_uncertainty+loss_proxy_sensitivity${official.length?'+official_external_validation':''}`,empirical_ready:true,episode_n:scenarios.length,official_scenarios:official.length};
+    const rows=replicationSnapshot?.scenario_rows?.length?replicationSnapshot.scenario_rows.filter(r=>r.scenario_type==='adversarial'):await cached(env,projectId,'scn:user-adversarial',()=>all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='adversarial' ORDER BY name`,[projectId]));
+    if(rows.length)return {scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:replicationSnapshot?'replication_snapshot_adversarial_scenarios':'user_adversarial_scenarios',empirical_ready:true,episode_n:rows.length};
+    const base=paperStressScenarios(cal),boot=calibrationUncertaintyScenarios(cal),loss=lossProxyScenarios(cal),official=replicationSnapshot?[]:await officialValidationScenarios(env,projectId,cal),scenarios=[...base,...boot,...loss,...official];
+    return {scenarios,source:replicationSnapshot?'replication_snapshot_generated_stress':`paper_wide_40pct_grid+calibration_uncertainty+loss_proxy_sensitivity${official.length?'+official_external_validation':''}`,empirical_ready:true,episode_n:scenarios.length,official_scenarios:official.length};
   }
   return {scenarios:syntheticScenarios(cal),source:'published_summary_anchor',empirical_ready:false,episode_n:0};
 }
+function replicationHoldoutScenarios(scenarios,salt){
+  if(!salt)return scenarios;
+  return scenarios.map((sc,i)=>{
+    const rng=mulberry32(hashString(`${salt}|${sc.key}|${i}|holdout-v1`)&0x7fffffff);
+    const centered=()=>rng()*2-1, mult=(width)=>1+width*centered();
+    const severity=clamp(Number(sc.severity??.75)*mult(.08),0,1), concentration=clamp(Number(sc.concentration??.75)*mult(.06),0,1), digital=clamp(Number(sc.digital??.5)*mult(.06),0,1), empirical_outflow=clamp(Number(sc.empirical_outflow??0)*mult(.08),0,.95);
+    return {...sc,key:`rep_${i}_${String(sc.key||'scenario')}`,name:`Independent holdout: ${sc.name||sc.key||i+1}`,severity,concentration,digital,empirical_outflow,volatility:Math.max(.01,Number(sc.volatility??1)*mult(.08)),delay_multiplier:Math.max(.1,Number(sc.delay_multiplier??1)*mult(.08)),loss_multiplier:Math.max(.1,Number(sc.loss_multiplier??1)*mult(.08)),rho:clamp(Number(sc.rho??.82)+.03*centered(),-.99,.99),process_noise:Math.max(.001,Number(sc.process_noise??.03)*mult(.10)),shift_magnitude:Math.max(0,Number(sc.shift_magnitude??0)*mult(.10)),provenance:`${sc.provenance||'synthetic'}+independent_holdout_v1`,validation_group:'Independent replication'};
+  });
+}
+
 async function priorAggregate(env,candidateId,phase){
   let phases=phase==='refinement'?['exploration','refinement']:[phase];
   if(phase==='confirmation')phases=['confirmation'];
@@ -317,10 +407,14 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   if(['github-actions','hybrid'].includes(env.COMPUTE_EXECUTOR)&&env.EXTERNAL_RUNTIME!=='github-actions')throw new Error('compute_requires_github_actions');
   const c=await one(env.DB,`SELECT * FROM design_candidates WHERE id=? AND project_id=?`,[candidateId,projectId]);if(!c)throw new Error('candidate_not_found');
   const projectMeta=await cached(env,projectId,'project:compute-meta',()=>one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]),30_000);const projectCycle=Number(projectMeta?.research_cycle||1),projectRev=Number(projectMeta?.evidence_revision||0);if(Number(c.research_cycle||1)!==projectCycle)throw new Error('candidate_superseded_by_new_cycle');
-  await assertProtocolIntegrity(env,projectId,{cycle:projectCycle});
-  const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,cal=await loadEmpiricalCalibration(env,projectId),config=configFrom(def,env,cal);
-  let reviewer=null;if(phase==='recompute'){const key=`reviewer:latest:${projectCycle}:${projectRev}`;const rm=await cached(env,projectId,key,()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,projectCycle,projectRev]));reviewer=rm?safeJson(rm.model_json,{}):null;}
-  const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,c.pair_seed_key||candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
+  const protocolAttestation=await assertProtocolIntegrity(env,projectId,{cycle:projectCycle});
+  const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,replicationMode=String(def.content.benchmark?.replication_mode||'')==='independent_replication_v1';let replicationSnapshot=null,cal;
+  if(replicationMode){const rr=await one(env.DB,`SELECT locked_empirical_json,locked_scenarios_json FROM independent_replications WHERE project_id=? AND replication_cycle=? LIMIT 1`,[projectId,projectCycle]);if(!rr)throw new Error('replication_snapshot_missing');const e=safeJson(rr.locked_empirical_json,{}),q=safeJson(rr.locked_scenarios_json,{});cal=e.calibration;if(!cal)throw new Error('replication_calibration_snapshot_missing');replicationSnapshot={episodes:Array.isArray(e.episodes)?e.episodes:[],scenario_rows:Array.isArray(q.rows)?q.rows:[]};}else cal=await loadEmpiricalCalibration(env,projectId);const config=configFrom(def,env,cal);
+  const degradedReviewer={false_accept_rate:.25,correct_override_rate:.60,unnecessary_override_rate:.20,participant_accept_sd:.50,mean_delay:0,source:'preregistered_degraded_reviewer_v1'};
+  const key=`reviewer:latest:${projectCycle}:${projectRev}`;const rm=await cached(env,projectId,key,()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,projectCycle,projectRev]));const fittedReviewer=rm?safeJson(rm.model_json,{}):null;
+  // Selection is no longer performed under an ideal reviewer. Before a qualified human model exists, a preregistered degraded-reviewer condition is used; once fitted, the current-revision human model is used in every phase.
+  let reviewer=fittedReviewer||degradedReviewer;
+  const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal,replicationSnapshot); const scenarios=(config.replication_mode==='independent_replication_v1'&&['confirmation','recompute'].includes(phase)&&config.replication_scenario_mode==='deterministic_holdout_perturbation_v1')?replicationHoldoutScenarios(scenarioPack.scenarios,config.replication_scenario_salt):scenarioPack.scenarios; const seedNamespace=config.replication_mode==='independent_replication_v1'?`${projectId}|replication|${config.replication_seed_salt||'unsalted'}`:projectId; const seed=deterministicSeed(seedNamespace,c.pair_seed_key||candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
   const id=`sim_unit_${candidateId}_${phase}_${cycle}_${phase==='recompute'?projectRev:'protocol'}`,saved=await one(env.DB,`SELECT result_json FROM simulation_runs WHERE id=?`,[id]);
   const batch=emptyAgg(),baseline=emptyAgg();if(!saved)for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length],episodeSeed=hashString(seed+'|'+i);addEpisode(batch,simulateEpisode(c,constraints,mulberry32(episodeSeed),sc,reviewer,config,mulberry32(episodeSeed^0x5a5a)),sc.key,sc.validation_group||null);if(config.noninferiority)addEpisode(baseline,simulateEpisode({...c,authority_k:0},constraints,mulberry32(episodeSeed),sc,reviewer,config,mulberry32(episodeSeed^0x5a5a)),sc.key,sc.validation_group||null);}
   let combined=batch; if(!saved&&['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
@@ -331,7 +425,7 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   const currentScope=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
   if(Number(currentScope?.research_cycle||1)!==projectCycle||Number(currentScope?.evidence_revision||0)!==projectRev)throw new Error('compute_scope_changed_during_run');
   const resultHash=saved?ev.result_hash:await sha256Hex(stableStringify({seed,phase,cycle,projectRev,raw:batch,metrics:m}));
-  await run(env.DB,`INSERT OR IGNORE INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,result_hash:resultHash,raw:saved?ev.raw:batch,cycle,runner_code_revision:env.RUNNER_CODE_REVISION||null,engine_version:'DCV-CDRS-v3',confidence_method:config.confidence_method,candidate_role:c.candidate_role,reviewer_source:reviewer?'current_revision_human_model':'design_priors_unvalidated',estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev]);
+  await run(env.DB,`INSERT OR IGNORE INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,result_hash:resultHash,raw:saved?ev.raw:batch,cycle,runner_code_revision:env.RUNNER_CODE_REVISION||null,engine_version:'DCV-CDRS-v4',delay_mode:config.delay_mode,confidence_method:config.confidence_method,candidate_role:c.candidate_role,reviewer_source:fittedReviewer?'current_revision_human_model':'preregistered_degraded_reviewer_v1',estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:config.replication_mode==='independent_replication_v1'&&['confirmation','recompute'].includes(phase)?`${scenarioPack.source}+independent_holdout_v1`:scenarioPack.source,replication_mode:config.replication_mode||null,replication_seed_namespace:config.replication_mode==='independent_replication_v1'?'independent':null,replication_scenario_mode:config.replication_scenario_mode||null,protocol_hash:protocolAttestation?.protocol_hash||null,protocol_definition_version:protocolAttestation?.definition_version??null,protocol_attested_at_run:true,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev]);
   await run(env.DB,`INSERT OR IGNORE INTO candidate_evidence(id,project_id,candidate_id,phase,cycle,classification,boundary_score,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[`evidence_${id}`,projectId,candidateId,phase,cycle,ev.classification,ev.boundary_score,JSON.stringify(ev),nowIso()]);
   if(['exploration','refinement'].includes(phase)){
     let status=ev.classification==='FEASIBLE'?'provisionally_feasible':ev.classification==='INFEASIBLE'?'infeasible':'unresolved';
@@ -385,4 +479,4 @@ export async function computeRegretTable(env,projectId,preloadedRuns=null){
 }
 
 // Pure helpers exposed only for deterministic unit tests; production orchestration uses the exported CDRS functions above.
-export const __test = { simulateEpisode,confidenceFor,configFrom,applyNoninferiority,finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };
+export const __test = { replicationHoldoutScenarios,orthogonalBalancedDesign,designAudit,simulateEpisode,confidenceFor,configFrom,applyNoninferiority,finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };

@@ -774,3 +774,186 @@ body{background:var(--cw-bg)!important;color:var(--cw-ink)!important;overflow-x:
   .matrix-table-wrap{border-radius:9px!important}.matrix-table th,.matrix-table td,.fdic-rank-table th,.fdic-rank-table td{padding:8px 10px!important;font-size:.72rem!important}
   .subpanel h3,.panel-head b{overflow-wrap:anywhere;word-break:keep-all}
 }
+
+
+/* ======================================================================
+   v0.9.1 · mobile blank-screen / navbar overflow hardening
+   - participant portal visibility no longer depends on Bootstrap .d-none
+   - compact navbar never overflows narrow Android viewports
+   - wide report tables scroll inside their own containers only
+   ====================================================================== */
+.human-portal[hidden]{display:none!important}
+.human-mode #humanPortal:not([hidden]){display:block!important;visibility:visible!important;opacity:1!important}
+.human-mode #dashboard{display:block!important;min-height:calc(100vh - 64px)!important}
+html,body{max-width:100%;overflow-x:hidden!important}
+.dcv-navbar .container-fluid{min-width:0}
+.navbar-brand,.dcv-hamburger,.icon-btn,.human-login-chip,.profile-chip{flex:0 0 auto}
+
+@media(max-width:767.98px){
+  .dcv-navbar .container-fluid{
+    display:grid!important;
+    grid-template-columns:42px minmax(0,1fr) 42px 52px!important;
+    align-items:center!important;
+    column-gap:8px!important;
+    padding-left:12px!important;
+    padding-right:12px!important;
+    width:100%!important;
+    max-width:100%!important;
+  }
+  .dcv-hamburger{grid-column:1!important;margin:0!important;width:42px!important;height:42px!important}
+  .navbar-brand{grid-column:2!important;margin:0!important;min-width:0!important;overflow:hidden!important;gap:8px!important}
+  .navbar-brand .brand-mark{width:36px!important;height:36px!important;flex:0 0 36px!important}
+  .navbar-brand>span:last-child{min-width:0!important;overflow:hidden!important}
+  .navbar-brand b{font-size:1.12rem!important;white-space:nowrap!important}
+  .navbar-brand small{display:none!important}
+  #refreshBtn{display:none!important}
+  #humanLoginBtn{grid-column:3!important;margin:0!important;width:42px!important;height:42px!important;justify-self:end!important}
+  #tokenBtn{grid-column:4!important;margin:0!important;width:52px!important;height:44px!important;justify-self:end!important}
+  .dcv-shell{width:100%!important;max-width:100%!important;margin:0!important;padding-left:12px!important;padding-right:12px!important}
+  .human-mode .dcv-shell{padding-top:76px!important}
+  .human-portal{width:100%!important;max-width:100%!important;margin:0 0 16px!important}
+  .human-portal-card{width:100%!important;max-width:100%!important;overflow:hidden!important}
+  .fdic-ranking,.matrix-table-wrap,.table-responsive,.report-view{min-width:0!important;max-width:100%!important;overflow-x:auto!important}
+}
+@media(max-width:390px){
+  .dcv-navbar .container-fluid{grid-template-columns:40px minmax(0,1fr) 40px 48px!important;column-gap:6px!important;padding-left:8px!important;padding-right:8px!important}
+  .navbar-brand .brand-mark{width:32px!important;height:32px!important;flex-basis:32px!important}
+  .navbar-brand b{font-size:1.02rem!important}
+  #humanLoginBtn{width:40px!important;height:40px!important}
+  #tokenBtn{width:48px!important;height:42px!important}
+}
+
+/* ======================================================================
+   v0.9.3 · mobile dashboard layout recovery
+   - hard single-column analysis stack on touch/mobile viewports
+   - no card/canvas may widen the document
+   - header controls wrap inside their card instead of overlapping content
+   ====================================================================== */
+html,body,#dashboard,.dcv-shell{width:100%;max-width:100%;min-width:0}
+#stats,#computeSection,#projectsSection,#detailPanel,#computeSection>* ,#projectsSection>*{min-width:0!important;max-width:100%!important}
+#computeSection article,#projectsSection article,#detailPanel article,.glass-panel,.subpanel{min-width:0!important;max-width:100%!important}
+.chart-wrap{max-width:100%!important;overflow:hidden!important}
+#regionCanvas{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important}
+
+@media(max-width:991.98px), (hover:none) and (pointer:coarse){
+  .dcv-shell{padding-left:12px!important;padding-right:12px!important}
+  #stats{display:grid!important;grid-template-columns:1fr!important;gap:12px!important}
+  #computeSection{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    grid-auto-flow:row!important;
+    gap:14px!important;
+    width:100%!important;
+    max-width:100%!important;
+    overflow:visible!important;
+  }
+  #computeSection>.col-12,
+  #computeSection>.col-12:first-child,
+  #computeSection>.col-12:nth-child(2){
+    display:block!important;
+    grid-column:1!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    margin:0!important;
+    padding:0!important;
+  }
+  #computeSection>.col-12:nth-child(2)>.row{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    grid-template-rows:auto!important;
+    gap:14px!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    margin:0!important;
+  }
+  #computeSection>.col-12:nth-child(2)>.row>.col-12{
+    display:block!important;
+    grid-column:1!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    padding:0!important;
+    margin:0!important;
+  }
+  #computeSection .glass-panel,#computeSection article{
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    overflow:hidden!important;
+  }
+  #computeSection .panel-head{
+    position:static!important;
+    display:flex!important;
+    height:auto!important;
+    min-height:0!important;
+    flex-wrap:wrap!important;
+    align-items:flex-start!important;
+    gap:10px!important;
+  }
+  #computeSection .panel-head>div:first-child{
+    min-width:0!important;
+    width:auto!important;
+    flex:1 1 220px!important;
+    grid-template-rows:auto auto!important;
+  }
+  #computeSection .fig-quick{
+    position:static!important;
+    left:auto!important;
+    bottom:auto!important;
+    display:flex!important;
+    flex:0 0 auto!important;
+    gap:6px!important;
+    margin-left:auto!important;
+  }
+  #computeSection #regionBadge{
+    position:static!important;
+    right:auto!important;
+    bottom:auto!important;
+    max-width:100%!important;
+    white-space:normal!important;
+  }
+  #computeSection .fig-quick .btn-ghost{min-width:0!important;padding:7px 10px!important}
+  .chart-wrap{
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    min-height:300px!important;
+    height:300px!important;
+    overflow:hidden!important;
+  }
+  .chart-wrap canvas,#regionCanvas{
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:270px!important;
+    min-height:270px!important;
+  }
+  #projectsSection{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    gap:14px!important;
+    width:100%!important;
+    max-width:100%!important;
+  }
+  #projectsSection>*{grid-column:1!important;width:100%!important;max-width:100%!important;min-width:0!important}
+  .project-row{grid-template-columns:minmax(0,1fr) auto!important;min-width:0!important}
+  .workflow-ribbon{grid-template-columns:repeat(2,minmax(0,1fr))!important;width:100%!important;max-width:100%!important}
+  .workflow-step{min-width:0!important}
+  .panel-head b,.panel-head small,.project-name b,.project-name small{max-width:100%!important;overflow-wrap:anywhere!important}
+}
+
+@media(max-width:480px){
+  .hero-panel{padding:20px 16px!important}
+  .hero-copy h1{font-size:1.85rem!important;line-height:1.08!important}
+  .hero-copy h2{font-size:1rem!important}
+  .workflow-ribbon{grid-template-columns:1fr!important}
+  .workflow-step{border-right:0!important}
+  #computeSection .panel-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important}
+  #computeSection .fig-quick{margin-left:0!important;justify-content:flex-start!important}
+  .chart-wrap{height:280px!important;min-height:280px!important}
+  .chart-wrap canvas,#regionCanvas{height:250px!important;min-height:250px!important}
+}

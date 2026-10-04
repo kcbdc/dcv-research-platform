@@ -1,4 +1,4 @@
-> Current release: **v0.9.2** — mobile blank-screen and navbar overflow hardening.
+> Current release: **v0.9.3** — mobile blank-screen and navbar overflow hardening.
 
 # DCV Research Platform v0.8.9
 

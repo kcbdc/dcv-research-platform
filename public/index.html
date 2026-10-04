@@ -7,8 +7,8 @@
   <title>DCV Research Platform</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=0.9.0" />
-  <link rel="stylesheet" href="/lab.css?v=0.9.0">
+  <link rel="stylesheet" href="/style.css?v=0.9.3" />
+  <link rel="stylesheet" href="/lab.css?v=0.9.3">
 </head>
 <body>
   <div class="ambient-grid"></div>
@@ -57,7 +57,7 @@
   </div>
 
   <main id="dashboard" class="container-fluid dcv-shell px-3 px-xl-4">
-    <section id="humanPortal" class="human-portal d-none" aria-live="polite"><div class="human-portal-card"><div class="human-portal-head"><div><span>DCV HUMAN STUDY</span><h2 id="humanPortalTitle">연구 참가자 모드</h2><p id="humanPortalMeta">1회용 연구 초대코드로 로그인했습니다.</p></div><button id="humanLogoutBtn" type="button" class="btn-ghost">참가 종료</button></div><div class="human-portal-status"><div><small>참가자</small><b id="humanPortalParticipant">-</b></div><div><small>연구주기</small><b id="humanPortalCycle">-</b></div><div><small>상태</small><b id="humanPortalState">로그인</b></div></div><button id="humanPortalStartBtn" type="button" class="btn-future w-100">이해 확인 및 실험 시작</button><div id="humanPortalTrial" class="mt-3"></div></div></section>
+    <section id="humanPortal" class="human-portal" aria-live="polite" hidden><div class="human-portal-card"><div class="human-portal-head"><div><span>DCV HUMAN STUDY</span><h2 id="humanPortalTitle">연구 참가자 모드</h2><p id="humanPortalMeta">1회용 연구 초대코드로 로그인했습니다.</p></div><button id="humanLogoutBtn" type="button" class="btn-ghost">참가 종료</button></div><div class="human-portal-status"><div><small>참가자</small><b id="humanPortalParticipant">-</b></div><div><small>연구주기</small><b id="humanPortalCycle">-</b></div><div><small>상태</small><b id="humanPortalState">로그인</b></div></div><button id="humanPortalStartBtn" type="button" class="btn-future w-100">이해 확인 및 실험 시작</button><div id="humanPortalTrial" class="mt-3"></div></div></section>
     <section class="hero-panel">
       <div class="hero-copy">
         <div class="eyebrow"><span></span> DOCTORAL RESEARCH OPERATING SYSTEM</div>
@@ -149,8 +149,8 @@
   <div class="modal fade" id="tokenModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content future-modal"><div class="modal-header"><h5 class="modal-title">관리 토큰</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><input id="tokenInput" class="form-control" type="password" placeholder="ADMIN_TOKEN"><small class="text-secondary">토큰은 이 브라우저의 sessionStorage에만 저장됩니다.</small></div><div class="modal-footer"><button id="saveTokenBtn" class="btn-future">저장</button></div></div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
-  <script type="module" src="/app.js?v=0.9.0"></script>
-  <script type="module" src="/thesis.js?v=0.9.0"></script>
+  <script type="module" src="/app.js?v=0.9.3"></script>
+  <script type="module" src="/thesis.js?v=0.9.3"></script>
   <script type="module" src="/redesign.js?v=0.8.0"></script>
   <script type="module" src="/lab.js?v=0.7.0"></script>
 </body>

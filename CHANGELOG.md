@@ -1,3 +1,9 @@
+## v0.9.3
+
+- Recovered the mobile dashboard layout after legacy desktop grid rules caused analytical cards and the region canvas to overflow narrow Android viewports.
+- Added hard single-column layout invariants for mobile/touch devices, bounded canvas/card widths, and safe wrapping for figure controls.
+- Bumped public asset cache keys to v0.9.3 and added mobile layout regression tests.
+
 # v0.9.0 — Research invite login & mobile UX stabilization
 
 - One-time human-study invite codes now act as participant login credentials without granting admin access.

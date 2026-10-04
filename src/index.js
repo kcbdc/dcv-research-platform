@@ -15,7 +15,7 @@ import { latestProtocol } from './lib/rigor.js';
 import { registerEvidence, approvalGates } from './lib/evidence.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
 import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
-import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus } from './lib/official_sources.js';
+import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus, testOfficialConnector } from './lib/official_sources.js';
 import { getValidationMatrix, refreshValidationMatrix } from './lib/validation_matrix.js';
 import {labApi,scheduleLab} from './lib/lab.js';
 import {calibrateConstraintQuantiles,constraintSensitivityCurve} from './lib/constraint_calibration.js';
@@ -213,6 +213,7 @@ async function api(request,env,ctx=null){
     if(parts[3]==='official-sources' && parts[4]==='status' && method==='GET'){ return json(await officialSourceStatus(env,projectId)); }
     if(parts[3]==='official-sources' && parts[4]==='enable' && method==='POST'){ const b=await bodyJson(request); const ids=Array.isArray(b.connector_ids)?b.connector_ids:[b.connector_id].filter(Boolean); const out=[]; for(const id of ids) out.push({connector_id:id,...await enableOfficialConnector(env,projectId,id,(b.configs||{})[id]||b.config||{})}); return json({enabled:out,status:await officialSourceStatus(env,projectId)},201); }
     if(parts[3]==='official-sources' && parts[4]==='collect' && method==='POST'){ await enqueueOnce(env,projectId,'collect_project',{refresh:true,official_manual:true},20,1); return json({status:'queued'}); }
+    if(parts[3]==='official-sources' && parts[4]==='test' && method==='POST'){ const b=await bodyJson(request); return json(await testOfficialConnector(env,b.connector_id,b.config||{})); }
     if(parts[3]==='fdic' && parts[4]==='status' && method==='GET'){ return json(await fdicStatus(env,projectId)); }
     if(parts[3]==='fdic' && parts[4]==='enable' && method==='POST'){ const enabled=await enableFdicConnectors(env,projectId); const links=await resolveFdicLinks(env,projectId,{autoConfirm:true,maxEpisodes:81}); await enqueueOnce(env,projectId,'collect_project',{refresh:true,fdic_manual:true},20,1); return json({status:'enabled',...enabled,links}); }
     if(parts[3]==='fdic' && parts[4]==='resolve' && method==='POST'){ const b=await bodyJson(request); return json(await resolveFdicLinks(env,projectId,{autoConfirm:b.auto_confirm!==false,maxEpisodes:Number(b.max_episodes||81)})); }

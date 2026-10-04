@@ -37,9 +37,22 @@ test('ECOS connector uses secret and StatisticSearch row normalization',async()=
   try{const r=await collectOfficialSource({DB,ECOS_API_KEY:'secret'},'p',s);assert.equal(r.changed,1);assert.match(called,/StatisticSearch\/secret\/json\/kr/);const x=DB.raw.prepare(`SELECT * FROM official_observations`).get();assert.equal(x.value_num,2.5);assert.equal(x.jurisdiction,'KR');}finally{globalThis.fetch=old;}
 });
 
-test('Case B connectors are isolated and remain CONFIG_REQUIRED without dataset endpoint',async()=>{
-  const DB=seed();await enableOfficialConnector({DB},'p','openfiscal');await enableOfficialConnector({DB},'p','bojo_openapi');const st=await officialSourceStatus({DB},'p');assert.equal(st.layers.find(x=>x.layer_code==='B').enabled,1);assert.equal(st.sources.find(x=>x.connector_id==='openfiscal').config.status,'CONFIG_REQUIRED');assert.equal(st.sources.find(x=>x.connector_id==='bojo_openapi').config.status,'READY');
-  const s=await source(DB,'openfiscal');assert.equal(s.enabled,0);await assert.rejects(()=>collectOfficialSource({DB,OPENFISCAL_API_KEY:'k'},'p',s),/CONFIG_REQUIRED/);
+test('Case B dedicated OpenFiscal connector is READY by default and remains isolated from BOJO',async()=>{
+  const DB=seed();await enableOfficialConnector({DB},'p','openfiscal');await enableOfficialConnector({DB},'p','bojo_openapi');const st=await officialSourceStatus({DB},'p');assert.equal(st.layers.find(x=>x.layer_code==='B').enabled,1);assert.equal(st.sources.find(x=>x.connector_id==='openfiscal').config.status,'READY');assert.equal(st.sources.find(x=>x.connector_id==='bojo_openapi').config.status,'READY');
+  const src=await source(DB,'openfiscal');assert.equal(src.enabled,1);assert.equal(src.config_json.includes('OPFI156'),true);
+});
+
+test('OpenFiscal OPFI156 XML parser and collector preserve fiscal dimensions',async()=>{
+  const DB=seed();await enableOfficialConnector({DB},'p','openfiscal',{account_year:'2025'});const src=await source(DB,'openfiscal'),old=globalThis.fetch;let called='';
+  const xml=`<?xml version="1.0"?><OPFI156><head><list_total_count>2</list_total_count><RESULT><CODE>INFO-000</CODE><MESSAGE>정상 처리되었습니다.</MESSAGE></RESULT></head><row><ACNT_YR>2025</ACNT_YR><BDG_FND_DIV_NM>기금</BDG_FND_DIV_NM><ACNT_DIV_NM>기금</ACNT_DIV_NM><SMOK_DIV_NM>사회보험성기금</SMOK_DIV_NM><SUM_NASS_TREV_BDG_AMT>96.5</SUM_NASS_TREV_BDG_AMT></row><row><ACNT_YR>2025</ACNT_YR><BDG_FND_DIV_NM>예산</BDG_FND_DIV_NM><ACNT_DIV_NM>기업특별회계</ACNT_DIV_NM><SMOK_DIV_NM>세외수입</SMOK_DIV_NM><SUM_NASS_TREV_BDG_AMT>7.5</SUM_NASS_TREV_BDG_AMT></row></OPFI156>`;
+  globalThis.fetch=async url=>{called=String(url);return new Response(xml,{status:200,headers:{'content-type':'application/xml'}})};
+  try{const r=await collectOfficialSource({DB,OPENFISCAL_API_KEY:'secret'},'p',src);assert.equal(r.changed,2);assert.match(called,/OPFI156/);assert.match(called,/Key=secret/);assert.match(called,/ACNT_YR=2025/);const x=DB.raw.prepare(`SELECT * FROM official_observations WHERE metric_code='openfiscal.revenue.structure' ORDER BY value_num DESC LIMIT 1`).get();assert.equal(x.value_num,96.5);assert.match(x.series_key,/사회보험성기금/);assert.equal(x.period,'2025');assert.equal(r.meta.code,'INFO-000');}finally{globalThis.fetch=old;}
+});
+
+test('ECOS dedicated default resolves latest monthly END_TIME using StatisticItemList',async()=>{
+  const DB=seed();await enableOfficialConnector({DB},'p','bok_ecos');const src=await source(DB,'bok_ecos'),old=globalThis.fetch;const calls=[];
+  globalThis.fetch=async url=>{calls.push(String(url));if(String(url).includes('StatisticItemList'))return new Response(JSON.stringify({StatisticItemList:{row:[{STAT_CODE:'102Y004',ITEM_CODE:'ABA1',ITEM_NAME:'본원통화(평잔,계절조정계열)',CYCLE:'M',START_TIME:'200310',END_TIME:'202607',UNIT_NAME:'십억원'}]}}),{status:200,headers:{'content-type':'application/json'}});return new Response(JSON.stringify({StatisticSearch:{row:[{STAT_CODE:'102Y004',ITEM_CODE1:'ABA1',ITEM_NAME1:'본원통화(평잔,계절조정계열)',TIME:'202607',DATA_VALUE:'315000.1',UNIT_NAME:'십억원'}]}}),{status:200,headers:{'content-type':'application/json'}})};
+  try{const r=await collectOfficialSource({DB,ECOS_API_KEY:'secret'},'p',src);assert.equal(r.changed,1);assert.ok(calls.some(x=>x.includes('StatisticItemList')));assert.ok(calls.some(x=>x.includes('/102Y004/M/200310/202607/ABA1')));assert.equal(r.meta.end_period,'202607');const x=DB.raw.prepare(`SELECT * FROM official_observations`).get();assert.equal(x.metric_code,'ecos.monetary_base.sa.avg');assert.equal(x.value_num,315000.1);}finally{globalThis.fetch=old;}
 });
 
 test('connector registry covers requested sequence',()=>{

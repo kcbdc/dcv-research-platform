@@ -1,0 +1,4 @@
+DCV Research Platform v0.9.7
+Command: npm test
+Result: 229 tests, 229 passed, 0 failed.
+Additional build: npm run lab:bundle -> 72 scientific source/schema files bundled.

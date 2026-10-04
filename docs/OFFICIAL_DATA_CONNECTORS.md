@@ -59,3 +59,23 @@ Using the latest common observation period for LCR and CET1:
 - `theta_ext = theta_low + (theta_high-theta_low) * R_ECB`
 
 The 100% LCR and 4.5% CET1 values are regulatory minima used only as normalization anchors. `theta_ext` is bounded to the model's predeclared theta range and is an external stress-validation transform, not an estimate of Korea's theta. Component-only variants are retained for sensitivity analysis.
+
+
+## v0.9.7 verified Korea connectors
+
+### BOK ECOS
+- Statistic table: `102Y004`
+- Item: `ABA1` — 본원통화(평잔, 계절조정계열)
+- Cycle: `M`
+- Start: `200310`
+- End: resolved from `StatisticItemList` (`END_TIME`) before `StatisticSearch`
+- Secret: `ECOS_API_KEY`
+- Research role: macro/context calibration; not direct payment-decision ground truth.
+
+### OpenFiscal
+- Endpoint: `https://openapi.openfiscaldata.go.kr/OPFI156`
+- Query: `Key`, `Type=xml`, `pIndex`, `pSize`, `ACNT_YR`
+- Row path: `/OPFI156/row`
+- Fields: `ACNT_YR`, `BDG_FND_DIV_NM`, `ACNT_DIV_NM`, `SMOK_DIV_NM`, `SUM_NASS_TREV_BDG_AMT`
+- Secret: `OPENFISCAL_API_KEY`
+- Research role: `CONTEXTUAL_PUBLIC_PAYMENT`; not outcome-labelled FN/FP validation.

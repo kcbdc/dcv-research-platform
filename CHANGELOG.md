@@ -1,3 +1,10 @@
+# v0.9.7
+
+- Added dedicated BOK ECOS 102Y004/ABA1 monthly connector with latest END_TIME discovery.
+- Added dedicated OpenFiscal OPFI156 XML parser, pagination and fiscal-dimension preservation.
+- Added official connector connection-test API/UI and safe secret-configured status.
+- 229/229 tests pass.
+
 ## v0.9.5
 - Mobile chart safe area and autonomous research-lab D1 read tuning.
 

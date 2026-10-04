@@ -1,4 +1,4 @@
-# DCV Research Platform v0.8.8
+# DCV Research Platform v0.8.9
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
 

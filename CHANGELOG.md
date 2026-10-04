@@ -1,3 +1,12 @@
+# v0.8.9 Protocol-runtime recovery and UNEVALUATED self-heal
+
+- Frozen protocol runtime contract upgraded to DCV-PROTOCOL-1.3 / DCV-CDRS-v4.
+- Compute jobs are bound to the frozen execution_config snapshot.
+- Protocol mismatch no longer retries candidate jobs to failure; prior cycle is preserved and a fresh cycle is created automatically.
+- Existing failed protocol-mismatch jobs are detected by advance_project so stranded UNEVALUATED candidates self-heal.
+- GitHub Actions treats successful protocol-cycle recovery as recovery, not a workflow failure.
+- UNEVALUATED UI card layout corrected.
+
 # v0.8.8 External-validity claim gate
 
 - Added a dedicated external-validity evidence registry for real public-payment datasets and external evaluations.

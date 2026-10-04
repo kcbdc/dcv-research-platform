@@ -1,80 +1,75 @@
 {
-  "version": "0.8.8",
+  "version": "0.8.9",
   "modified_files": [
     {
-      "path": "src/lib/external_validity.js",
-      "sha256": "887863f9b3bff671bee75a08aba331262b62473f22a565ddc3b012789dd062ba",
-      "bytes": 8072
+      "path": "src/lib/rigor.js",
+      "sha256": "e4d5e9f051edad55f319089ff341c186551f9134d9012feb2ead0af122942bc8",
+      "bytes": 10326
     },
     {
-      "path": "src/index.js",
-      "sha256": "538a9a8674846abc3212e0b7a3b551635d4990442825c78f2970fb4151406f15",
-      "bytes": 39803
+      "path": "src/lib/compute.js",
+      "sha256": "2fc5625f5e29cc1e076feacf3a029115ef9548eea7377a7295ea953959449d45",
+      "bytes": 55257
     },
     {
-      "path": "src/lib/thesis.js",
-      "sha256": "960cdb25147e14f5ed9de59149d53ac162c27cee881f16c10ffb529ec9dbfab6",
-      "bytes": 42671
+      "path": "src/lib/orchestrator.js",
+      "sha256": "adf43b4f81b6fa23470011ccc0647176d6c5b433c7c8b1c864886647b8fac1a0",
+      "bytes": 22393
     },
     {
-      "path": "src/lib/approve.js",
-      "sha256": "9cf194c39b14c5434305906f6d9f2a419a3ad28af317cccb9f8a00fcdc5946d8",
-      "bytes": 6469
+      "path": "scripts/lib/runner-diagnostics.mjs",
+      "sha256": "d37a64463df9264beee6cd521cf9a2d40699ea6325f604b5a13388589e758c98",
+      "bytes": 4812
     },
     {
-      "path": "src/lib/report.js",
-      "sha256": "9b75f1a944631c05d3005bc4f9c3682efef0809ec3521c9f691535b54bd21826",
-      "bytes": 46365
+      "path": "public/app.js",
+      "sha256": "50dccb3cb384aa8c2787e9fbd2d5e7f669e8b5ac78392ebc3211f2f42ca1a51d",
+      "bytes": 66833
     },
     {
       "path": "src/lib/util.js",
-      "sha256": "183348ef0967f18a9f1838f54d455dfa427afc5207f575abe5dfd5e5550eb2cd",
+      "sha256": "d8414d5412850f2226365906d2b3c3a86651e6156343803c387ba14759dd96fc",
       "bytes": 1973
     },
     {
       "path": "src/lib/lab_code_bundle.js",
-      "sha256": "d93f2872058f5a26c8273d8bb2121c24e0c9a566f8609634cd329b95880eea3b",
-      "bytes": 612407
+      "sha256": "935bd1f29508f31ecc5cae4d2401fde79abc2653201df862c881d9dfe4eea9c1",
+      "bytes": 615515
     },
     {
-      "path": "migrations/0026_external_validity_claim_gate.sql",
-      "sha256": "aa4e63176c55c25ad7adb07f90c98ed80a496b74980a150756af098bdbcd4185",
-      "bytes": 1815
-    },
-    {
-      "path": "tests/v088_external_validity.test.mjs",
-      "sha256": "21d0a5489e5960980c2e6b6a7930be39ec71840c0ff948a29d081a5f99800f75",
-      "bytes": 2750
+      "path": "tests/v089_protocol_recovery.test.mjs",
+      "sha256": "c0c1e3851ab1b965365e0d572d8411e7e6e03a08e66ceb817a3bab081d7ce1f9",
+      "bytes": 3862
     },
     {
       "path": "package.json",
-      "sha256": "9ac7edabc1a5363304cf8ac6f6fd329548247ac493c2db641cf29fec47a1fcee",
+      "sha256": "9d3f72a17d3a7195af142a8448752b1fb940305c42769f23d0bea4195bdd1327",
       "bytes": 1272
     },
     {
       "path": "package-lock.json",
-      "sha256": "d1185f8b33c508d4897b5556b096a7e95beb1e066d0a45770f0be3469e0f8a47",
+      "sha256": "7acabed253683023b1fe89f4554893083b8f19f5b7a285ca1ac4250e67eba7d8",
       "bytes": 49468
     },
     {
       "path": "README.md",
-      "sha256": "28eaaf6c707c5c054a1be852d2b0270fc92d77e5b82faea53c61905c1d8ffc5d",
+      "sha256": "bbc361c635bb81f293eb039e83f82e8350e02a19915bd98fb3f99ccb4896853f",
       "bytes": 17840
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "d1b95d9b8772e872bb790e47c8fa099df41ce56f85a7106983b170e2aa6c2659",
-      "bytes": 41456
+      "sha256": "4d010336340cccaf34c1072ea7065d99b5d414019f31a55c7b154e5a501738e7",
+      "bytes": 42053
     },
     {
-      "path": "PATCH_NOTES_v0.8.8.md",
-      "sha256": "3dd7b65dc85bbea0d770e26c452f1312372689f1ea055d71a57424b4820f1a28",
-      "bytes": 1723
+      "path": "PATCH_NOTES_v0.8.9.md",
+      "sha256": "1835badc7e05557029d37f8933704ef3b471a01642a048d90b15f77fb04d2d3a",
+      "bytes": 1138
     },
     {
-      "path": "TEST_REPORT_v0.8.8.txt",
-      "sha256": "445b04ffdd839e50c122cbf782660efcfada6a2ae0627b44b2e50b654366cb31",
-      "bytes": 50966
+      "path": "TEST_REPORT_v0.8.9.txt",
+      "sha256": "453244c0040dec5c23ddb7c0bcd8c7a697b4ad15ef4326b5f204f2f973d38dbb",
+      "bytes": 52066
     }
   ]
 }

@@ -1,3 +1,12 @@
+# v0.9.0 — Research invite login & mobile UX stabilization
+
+- One-time human-study invite codes now act as participant login credentials without granting admin access.
+- Added public human login bootstrap, resumable post-quiz session, and bulk invite issuance.
+- Added participant-only study portal and admin invite-code issuance UI.
+- Stabilized mobile action bars and wide research tables to prevent overlapping text.
+- Updated asset cache-busters and app version.
+- Full regression suite: 212/212 PASS.
+
 # v0.8.9 Protocol-runtime recovery and UNEVALUATED self-heal
 
 - Frozen protocol runtime contract upgraded to DCV-PROTOCOL-1.3 / DCV-CDRS-v4.

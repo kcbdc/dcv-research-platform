@@ -1,3 +1,8 @@
+
+## v0.9.5 D1 / AI Lab tuning
+
+Apply `migrations/0029_lab_d1_read_guard.sql` before deployment. The 10-agent lab now reads materialized cycle totals and bounded evidence samples, uses a cheap ETag probe for unchanged status polls, and refreshes heavyweight review evidence only on explicit leader review. See `D1_PROFILE_v0.9.5.md`.
+
 > Current release: **v0.9.3** — mobile blank-screen and navbar overflow hardening.
 
 # DCV Research Platform v0.8.9

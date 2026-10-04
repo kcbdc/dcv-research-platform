@@ -37,11 +37,12 @@ import {wilson} from './src/lib/stats.js';
 const snapshot=JSON.parse(fs.readFileSync(new URL('./data/evidence_snapshot.json',import.meta.url),'utf8'));
 const expected=snapshot.digest;delete snapshot.digest;
 assert.equal(createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'),expected,'Snapshot hash mismatch');
-const counts={};for(const c of snapshot.candidates)counts[c.status]=(counts[c.status]||0)+1;
-assert.deepEqual(counts,snapshot.diagnostics.counts,'Candidate totals mismatch');
+assert.equal(Number(snapshot.cycle_stats?.candidate_total||snapshot.candidates.length),Number(snapshot.diagnostics.counts.total),'Candidate total mismatch');
+assert.ok(snapshot.candidates.length<=40,'Candidate sample exceeds bounded lab snapshot');
+assert.ok(snapshot.runs.length<=240,'Simulation sample exceeds bounded lab snapshot');
 if(snapshot.episodes.length>=6){const fit=fitReducedForm(snapshot.episodes);assert.deepEqual(fit,snapshot.diagnostics.calibration,'Calibration mismatch');}
 const h=snapshot.human;if(Number(h.n)>0)assert.deepEqual(wilson(Number(h.appropriate||0),Number(h.n)),snapshot.diagnostics.human.appropriate_reliance,'Human interval mismatch');
-console.log(JSON.stringify({ok:true,scope:'hash, candidate totals, OLS and human Wilson interval',full_seed_replay:false},null,2));
+console.log(JSON.stringify({ok:true,scope:'hash, materialized candidate total, bounded evidence samples, OLS and human Wilson interval',full_seed_replay:false},null,2));
 `;
 export async function buildLabPackage(campaign,snapshot,documents,sources,journals,reviews=[],replication=null){
  const config=safeJson(campaign.config_json),docs=new Map(documents.map(d=>[d.section,d.markdown]));

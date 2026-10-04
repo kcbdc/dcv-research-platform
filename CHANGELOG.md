@@ -1,3 +1,6 @@
+## v0.9.5
+- Mobile chart safe area and autonomous research-lab D1 read tuning.
+
 ## v0.9.3
 
 - Recovered the mobile dashboard layout after legacy desktop grid rules caused analytical cards and the region canvas to overflow narrow Android viewports.

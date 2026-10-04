@@ -1068,3 +1068,21 @@ html,body,#dashboard,.dcv-shell{width:100%;max-width:100%;min-width:0}
 @media (max-width:420px){
   .chart-wrap canvas,#regionCanvas{height:245px!important;min-height:245px!important;max-height:245px!important}
 }
+
+
+/* ======================================================================
+   v0.9.5 · chart safe-area + mobile axis clipping repair
+   Keep canvas labels inside the rendered bitmap and reserve enough visual
+   breathing room below the chart on narrow Samsung/Chrome viewports.
+   ====================================================================== */
+#regionCanvas{box-sizing:border-box!important;max-width:100%!important}
+.chart-wrap{box-sizing:border-box!important;padding-bottom:8px!important;overflow:visible!important}
+@media(max-width:991.98px), (hover:none) and (pointer:coarse){
+  #computeSection>.col-12:first-child>article{overflow:visible!important}
+  #computeSection>.col-12:first-child>article .chart-wrap{height:340px!important;min-height:340px!important;padding:0 2px 14px!important;overflow:visible!important}
+  #computeSection>.col-12:first-child>article #regionCanvas{height:318px!important;min-height:318px!important;max-height:318px!important;width:100%!important;margin:0!important}
+}
+@media(max-width:480px){
+  #computeSection>.col-12:first-child>article .chart-wrap{height:326px!important;min-height:326px!important;padding-bottom:16px!important}
+  #computeSection>.col-12:first-child>article #regionCanvas{height:302px!important;min-height:302px!important;max-height:302px!important}
+}

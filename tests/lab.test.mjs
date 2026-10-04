@@ -34,7 +34,7 @@ test('snapshot reuse does one indexed project read and no candidate/episode scan
  const env=await makeEnv();await createLabCampaign(env,env.pid);const c=env.DB.raw.prepare('SELECT * FROM lab_campaigns').get(),snapshot=await readLabSnapshot(env,c);
  const log=[],wrapped={...env.DB,prepare:sql=>{log.push(sql);return env.DB.prepare(sql);}};
  const again=await readLabSnapshot({...env,DB:wrapped},{...c,snapshot_json:JSON.stringify(snapshot),snapshot_signature:snapshot.signature,snapshot_at:snapshot.captured_at});
- assert.equal(again.digest,snapshot.digest);assert.equal(log.length,1);assert.match(log[0],/FROM projects WHERE id/);
+ assert.equal(again.digest,snapshot.digest);assert.equal(log.length,1);assert.match(log[0],/FROM projects p LEFT JOIN project_cycle_stats/);
 });
 test('only one role runs per tick; another tick before due time is idle',async()=>{
  const env=await makeEnv();await createLabCampaign(env,env.pid);const result=await processLabTick(env);assert.equal(result.status,'task_completed');assert.equal(env.calls.length,1);
@@ -84,7 +84,7 @@ test('unchanged scheduled data is deduplicated without per-row D1 read queries',
 test('semantic evidence digest survives timestamp-only updates',async()=>{
  const env=await makeEnv();await createLabCampaign(env,env.pid);const c=env.DB.raw.prepare('SELECT * FROM lab_campaigns').get();const before=await readLabSnapshot(env,c);
  env.DB.raw.prepare("UPDATE projects SET updated_at='2099-01-01T00:00:00Z' WHERE id=?").run(env.pid);
- const after=await readLabSnapshot(env,c,{force:true});assert.equal(after.data_digest,before.data_digest);assert.notEqual(after.signature,before.signature);
+ const after=await readLabSnapshot(env,c,{force:true});assert.equal(after.data_digest,before.data_digest);assert.equal(after.signature,before.signature);
 });
 test('deadline finalization runs within the final cron interval',async()=>{
  const env=await makeEnv();await createLabCampaign(env,env.pid);env.DB.raw.prepare('UPDATE lab_campaigns SET deadline_at=?,next_run_at=?').run(new Date(Date.now()+300000).toISOString(),new Date(0).toISOString());

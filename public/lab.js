@@ -11,7 +11,7 @@ function ensureLab(){
  $('#labStartBtn').onclick=()=>action('',{});
  $('#labPauseBtn').onclick=()=>action(status?.campaign?.status==='active'?'pause':'resume',{});
  $('#labSettingsBtn').onclick=()=>{$('#labSettings').open=true;$('#labSettings').scrollIntoView({block:'start',behavior:'smooth'});};
- $('#labDesks').onclick=e=>{const b=e.target.closest('[data-role]');if(b)showDesk(b.dataset.role);};
+ $('#labDesks').onclick=e=>{const b=e.target.closest('[data-role]');if(b)showDesk(b.dataset.role,true);};
  $('#labLoadDocs').onclick=loadDocuments;
  $('#labReplayForm').onsubmit=saveReplay;$('#labConfigForm').onsubmit=saveConfig;$('#labJournalForm').onsubmit=saveJournal;
  $('#researchLabModal').addEventListener('hidden.bs.modal',stopPolling);
@@ -21,7 +21,7 @@ function ensureLab(){
 }
 function notice(text,error=false){const el=$('#labNotice');el.textContent=text;el.classList.toggle('lab-error',error);}
 function stopPolling(){clearTimeout(pollTimer);pollTimer=null;controller?.abort();}
-function schedulePoll(){clearTimeout(pollTimer);if(document.hidden||!$('#researchLabModal')?.classList.contains('show'))return;pollTimer=setTimeout(async()=>{await refresh();schedulePoll();},60000);}
+function schedulePoll(){clearTimeout(pollTimer);if(document.hidden||!$('#researchLabModal')?.classList.contains('show'))return;pollTimer=setTimeout(async()=>{await refresh();schedulePoll();},120000);}
 async function refresh(){
  if(loading||!activeProject)return;loading=true;controller=new AbortController();
  try{const r=await fetch(path(),{headers:{...headers(),...(etag?{'if-none-match':etag}:{})},signal:controller.signal,cache:'no-store'});if(r.status===304)return;
@@ -39,9 +39,9 @@ function render(){
  $('#labDesks').innerHTML=roles.map((r,i)=>{const t=r.activity,state=t?.status||'pending';return `<button class="lab-desk ${r.group} ${state==='running'?'working':''}" data-role="${r.id}" aria-label="${esc(r.name)} 책상"><span class="lab-seat"><span class="lab-person" style="--coat:${['#436eaa','#a76954','#51957a','#7775a9'][i%4]}"><i class="lab-hair"></i><i class="lab-face"></i><i class="lab-body"></i></span><span class="lab-monitor"><span>${state==='running'?'ANALYZING':state==='done'?'REVIEWED':'DCV LAB'}</span></span><span class="lab-table"></span></span><span class="lab-desk-name">${esc(r.name)}</span><small>${esc(r.title)}</small><span class="lab-badge ${state}">${esc(stateLabel[state]||state)}${t?' · Day '+t.day:''}</span>${r.id==='leader'?'<span class="lab-leader-note">최종 결과물 확인 ↗</span>':''}</button>`;}).join('');
  $('#labActivity').innerHTML=(status.activity||[]).map(t=>`<article><span>DAY ${t.day}</span><div><b>${esc(status.roles.find(r=>r.id===t.role_id)?.name||t.role_id)}</b><p>${esc(t.summary||t.error||'')}</p></div><small>${esc(date(t.completed_at))}</small></article>`).join('')||'<p>아직 실행된 작업이 없습니다. 활동 상태는 실제 서버 작업 기록에서 표시됩니다.</p>';
  if(c)fillSettings();
- if(selectedRole)void showDesk(selectedRole);
+ if(selectedRole)void showDesk(selectedRole,false);
 }
-async function showDesk(id){
+async function showDesk(id,loadReview=false){
  selectedRole=id;
  document.querySelectorAll('.lab-desk').forEach(e=>e.classList.toggle('selected',e.dataset.role===id));
  const role=status.roles.find(r=>r.id===id);$('#labDeskTitle').textContent=role.name+' · '+role.title;
@@ -50,7 +50,7 @@ async function showDesk(id){
  const pkg=status.package;
  $('#labDeskContent').insertAdjacentHTML('beforeend',pkg?`<div class="lab-delivery"><b>${esc(pkg.status==='INTERNAL_REVIEW_COMPLETE'?'내부 검토 완료':'보완이 필요한 초안 패키지')}</b><p>${(pkg.size_bytes/1024).toFixed(0)} KB · ${esc(date(pkg.created_at))}</p><button class="btn-future" id="labDownload">6종 결과물 ZIP 받기</button><button class="btn-ghost" id="labRebuild">설정 반영 후 ZIP 재생성</button><small>실제 저자 검토 후 투고 · 저널 게재승인 여부는 별도</small></div>`:'<div class="lab-delivery"><b>6종 결과물</b><p>10월 30일 마감 시 서버에 저장됩니다.<br>완료 전에는 아래 초안과 검토 항목을 확인할 수 있습니다.</p></div>');
  if(pkg){$('#labDownload').onclick=download;$('#labRebuild').onclick=()=>action('rebuild',{});}
- if(status.campaign){try{const r=await fetch(path('review'),{headers:headers(),cache:'no-store'});const data=await r.json();if(r.ok&&selectedRole==='leader'){$('#labReplayForm').elements.data_digest.value=data.data_digest||'';}if(r.ok&&selectedRole==='leader')$('#labDeskContent').insertAdjacentHTML('beforeend',`<h4>최종 검토 항목</h4><ul class="lab-blockers">${data.blockers.map(b=>'<li>'+esc(b)+'</li>').join('')}</ul>`);}catch(e){notice(e.message,true);}}
+ if(loadReview&&status.campaign){try{const r=await fetch(path('review'),{headers:headers(),cache:'no-store'});const data=await r.json();if(r.ok&&selectedRole==='leader'){$('#labReplayForm').elements.data_digest.value=data.data_digest||'';}if(r.ok&&selectedRole==='leader')$('#labDeskContent').insertAdjacentHTML('beforeend',`<h4>최종 검토 항목</h4><ul class="lab-blockers">${data.blockers.map(b=>'<li>'+esc(b)+'</li>').join('')}</ul>`);}catch(e){notice(e.message,true);}}
 }
 function fillSettings(){
  const form=$('#labConfigForm'),cfg=status.config;

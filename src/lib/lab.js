@@ -153,9 +153,9 @@ export async function scheduleLab(env){
  }catch(e){console.error('research_lab_scheduler',String(e));return {status:'unavailable',error:String(e)};}
 }
 
-export async function getLabStatus(env,projectId){
+export async function getLabStatus(env,projectId,seedCampaign=null){
  return cached(env,projectId,'lab:status',async()=>{
-  const c=await one(env.DB,`SELECT id,project_id,status,title,starts_at,deadline_at,next_run_at,cursor,total_tasks,completed_tasks,failed_tasks,config_json,lease_until,package_id,package_revision,last_error,updated_at FROM lab_campaigns WHERE project_id=?`,[projectId]);
+  const c=seedCampaign||await one(env.DB,`SELECT id,project_id,status,title,starts_at,deadline_at,next_run_at,cursor,total_tasks,completed_tasks,failed_tasks,config_json,lease_until,package_id,package_revision,last_error,updated_at FROM lab_campaigns WHERE project_id=?`,[projectId]);
   if(!c)return {campaign:null,roles:LAB_ROLES};
   const rs=await env.DB.batch([
    env.DB.prepare(`SELECT role_id,seq,day,status,summary,error,started_at,completed_at FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY role_id ORDER BY seq DESC) AS rn FROM lab_tasks WHERE campaign_id=? AND status!='pending') WHERE rn=1`).bind(c.id),
@@ -174,7 +174,13 @@ export async function getLabStatus(env,projectId){
 
 export async function labApi(request,env,projectId,parts){
  const method=request.method,action=parts[4]||'';
- if(method==='GET'&&!action){try{const status=await getLabStatus(env,projectId),c=status.campaign,etag='"'+(c?[c.status,c.updated_at,c.cursor,c.package_revision].join('|'):'empty')+'"';if(request.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers:{etag,'cache-control':'private, no-cache'}});return json(status,200,{etag});}catch(e){if(/no such table/.test(String(e)))return json({error:'lab_migration_required',migration:'0017_research_lab.sql'},503);throw e;}}
+ if(method==='GET'&&!action){try{
+  // Cheap ETag probe first: unchanged UI polls return 304 without scanning task/source tables.
+  const probe=await one(env.DB,`SELECT id,project_id,status,title,starts_at,deadline_at,next_run_at,cursor,total_tasks,completed_tasks,failed_tasks,config_json,lease_until,package_id,package_revision,last_error,updated_at FROM lab_campaigns WHERE project_id=?`,[projectId]);
+  const etag='"'+(probe?[probe.status,probe.updated_at,probe.cursor,probe.package_revision].join('|'):'empty')+'"';
+  if(request.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers:{etag,'cache-control':'private, no-cache'}});
+  const status=await getLabStatus(env,projectId,probe);return json(status,200,{etag});
+ }catch(e){if(/no such table/.test(String(e)))return json({error:'lab_migration_required',migration:'0017_research_lab.sql'},503);throw e;}}
  if(method==='POST'&&!action)return json(await createLabCampaign(env,projectId,await request.json()),201);
  const c=await one(env.DB,'SELECT * FROM lab_campaigns WHERE project_id=?',[projectId]);if(!c)return json({error:'lab_not_started'},404);
  if(method==='POST'&&['pause','resume'].includes(action)){
@@ -210,7 +216,7 @@ export async function labApi(request,env,projectId,parts){
  if(method==='POST'&&action==='replication'){
   const input=await request.json(),s=safeJson(c.snapshot_json),checks=input.checks||{};
   if(!s.data_digest||input.data_digest!==s.data_digest)throw new Error('Replication report must match current evidence data digest');
-  if(checks.full_seed_replay!==true||!Number.isInteger(checks.replayed_runs)||checks.replayed_runs<s.runs.length||!s.runs.length||!Number.isFinite(checks.max_absolute_error)||checks.max_absolute_error<0||checks.max_absolute_error>1e-8||!/^([a-f0-9]{64})$/i.test(checks.log_sha256||''))throw new Error('Provide verified full seed replay counts, maximum error <= 1e-8 and SHA256 of the execution log');
+  if(checks.full_seed_replay!==true||!Number.isInteger(checks.replayed_runs)||checks.replayed_runs<Number(s.cycle_stats?.simulation_total||s.runs.length)||Number(s.cycle_stats?.simulation_total||s.runs.length)<1||!Number.isFinite(checks.max_absolute_error)||checks.max_absolute_error<0||checks.max_absolute_error>1e-8||!/^([a-f0-9]{64})$/i.test(checks.log_sha256||''))throw new Error('Provide verified full seed replay counts, maximum error <= 1e-8 and SHA256 of the execution log');
   if(!String(input.verified_by||'').trim()||new URL(input.report_url).protocol!=='https:')throw new Error('Human verifier and HTTPS execution report required');
   await run(env.DB,`INSERT INTO lab_replication_reviews(campaign_id,data_digest,checks_json,report_url,verified_by,verified_at) VALUES(?,?,?,?,?,?) ON CONFLICT(campaign_id) DO UPDATE SET data_digest=excluded.data_digest,checks_json=excluded.checks_json,report_url=excluded.report_url,verified_by=excluded.verified_by,verified_at=excluded.verified_at`,[c.id,s.data_digest,JSON.stringify(checks),String(input.report_url).slice(0,2000),String(input.verified_by).slice(0,200),nowIso()]);
   bust(env,projectId,'lab:status');return json({ok:true,verification:'Human-attested external full seed replay; not certified by AI'});

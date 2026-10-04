@@ -1,5 +1,5 @@
 import {applyRedesign,applyBalancedRedesign} from './lib/redesign.js';
-import {createHumanTrial,recordHumanTrial,submitHumanQuiz,verifyHumanSession,issueHumanInvite,LEGACY_PROTOCOL} from './lib/human_trials.js';
+import {createHumanTrial,recordHumanTrial,submitHumanQuiz,verifyHumanSession,issueHumanInvite,loginHumanInvite,LEGACY_PROTOCOL} from './lib/human_trials.js';
 import { json, nowIso, uid, safeJson } from './lib/util.js';
 import { requireAdmin, routeAccessClass } from './lib/auth.js';
 import { all, one, run, enqueue, enqueueOnce, audit } from './lib/db.js';
@@ -111,6 +111,14 @@ async function api(request,env,ctx=null){
   const url=new URL(request.url), parts=pathParts(request.url), method=request.method.toUpperCase();
   if(url.pathname==='/api/health') return json({ok:true,app:env.APP_NAME||'DCV Research Platform',time:nowIso()});
   const access=routeAccessClass(parts,method);
+
+  if(parts[0]==='api'&&parts[1]==='human-login'&&method==='POST'){
+    try{const b=await bodyJson(request),fp=`${request.headers.get('cf-connecting-ip')||'no-ip'}|${request.headers.get('user-agent')||'no-ua'}`;return json(await loginHumanInvite(env,b.invite_token,fp),200);}catch(e){const code=String(e.message||'');const status=code==='human_invite_device_mismatch'?409:400;return json({error:code},status);}
+  }
+
+  if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]&&parts[3]==='reviewer-login'&&method==='POST'){
+    try{const b=await bodyJson(request),fp=`${request.headers.get('cf-connecting-ip')||'no-ip'}|${request.headers.get('user-agent')||'no-ua'}`;return json(await loginHumanInvite(env,b.invite_token,fp,parts[2]),200);}catch(e){const code=String(e.message||'');const status=code==='human_invite_device_mismatch'?409:400;return json({error:code},status);}
+  }
 
   // Participant-facing human-study endpoints are deliberately outside admin auth.
   // Quiz is the bootstrap step; successful completion issues an opaque session token.
@@ -264,7 +272,7 @@ async function api(request,env,ctx=null){
     if(parts[3]==='reviewer-glmm-package' && method==='GET'){ return json(await buildReviewerGlmmPackage(env,projectId)); }
     if(parts[3]==='replication' && method==='GET'){ return json(await replicationStatus(env,projectId)); }
     if(parts[3]==='replication' && parts[4]==='start' && method==='POST'){ const b=await bodyJson(request); return json(await startIndependentReplication(env,projectId,b),201); }
-    if(parts[3]==='human-invites' && method==='POST'){ const b=await bodyJson(request);if(!b.subject_key)return json({error:'subject_key_required',message:'Use a stable external respondent/recruitment ID; it is hashed server-side and never stored in plaintext.'},400);return json(await issueHumanInvite(env,projectId,{label:b.label||null,subject_key:b.subject_key}),201); }
+    if(parts[3]==='human-invites' && method==='POST'){ const b=await bodyJson(request);const count=Math.max(1,Math.min(50,Number(b.count||1)));if(count>1){const prefix=String(b.subject_prefix||'P').slice(0,40),invites=[];for(let i=0;i<count;i++)invites.push(await issueHumanInvite(env,projectId,{label:b.label?`${b.label} ${i+1}`:null,subject_key:`${prefix}${String(i+1).padStart(3,'0')}`}));return json({count:invites.length,invites},201);}if(!b.subject_key)return json({error:'subject_key_required',message:'Use a stable external respondent/recruitment ID; it is hashed server-side and never stored in plaintext.'},400);return json(await issueHumanInvite(env,projectId,{label:b.label||null,subject_key:b.subject_key}),201); }
     if(parts[3]==='constraint-sensitivity' && method==='GET'){
       const p=await one(env.DB,`SELECT pr.research_cycle,pc.constraints_json FROM projects pr JOIN project_config pc ON pc.project_id=pr.id WHERE pr.id=?`,[projectId]);if(!p)return json({error:'project_not_found'},404);
       const cycle=Number(p.research_cycle||1),rows=await all(env.DB,`SELECT r.candidate_id,r.phase,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.created_at FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('exploration','refinement')`,[projectId,cycle]);

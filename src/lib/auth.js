@@ -14,8 +14,9 @@ export function requireAdmin(request, env) {
 export function routeAccessClass(parts,method){
   if(parts[0]!=='api')return 'asset';
   if(parts[1]==='health')return 'public';
+  if(parts[1]==='human-login'&&method==='POST')return 'public-human-bootstrap';
   if(parts[1]==='projects'&&parts[2]){
-    if(parts[3]==='reviewer-quiz'&&method==='POST')return 'public-human-bootstrap';
+    if(['reviewer-login','reviewer-quiz'].includes(parts[3])&&method==='POST')return 'public-human-bootstrap';
     if(['reviewer-trials','reviewer-observations'].includes(parts[3])&&method==='POST')return 'human-session';
   }
   return 'admin';

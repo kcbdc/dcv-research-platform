@@ -47,6 +47,26 @@ async function counts(env,projectId,participant,cycle){
 async function issueSessionToken(env,projectId,participant,cycle){const token=`hs_${crypto.randomUUID()}_${crypto.randomUUID()}`,hash=await sha256Hex(token);await run(env.DB,`UPDATE reviewer_sessions SET session_token_hash=?,updated_at=? WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[hash,nowIso(),projectId,participant,HUMAN_PROTOCOL,cycle]);return token;}
 export async function verifyHumanSession(env,projectId,participant,token){if(!token)return false;const p=await one(env.DB,'SELECT research_cycle FROM projects WHERE id=?',[projectId]);if(!p)return false;const row=await one(env.DB,`SELECT session_token_hash,quiz_passed FROM reviewer_sessions WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[projectId,participant,HUMAN_PROTOCOL,Number(p.research_cycle||1)]);if(!row?.quiz_passed||!row.session_token_hash)return false;return secureEqual(String(row.session_token_hash),await sha256Hex(String(token)));}
 
+
+export async function loginHumanInvite(env,inviteToken,requestFingerprint='',projectId=null){
+ if(!inviteToken)throw new Error('human_invite_required');
+ const tokenHash=await sha256Hex(String(inviteToken));
+ const row=await one(env.DB,`SELECT i.*,p.name project_name,p.research_cycle current_cycle,p.evidence_revision current_revision FROM reviewer_invites i JOIN projects p ON p.id=i.project_id WHERE i.token_hash=? ${projectId?'AND i.project_id=?':''} LIMIT 1`,projectId?[tokenHash,projectId]:[tokenHash]);
+ if(!row)throw new Error('invalid_human_invite');
+ const cycle=Number(row.current_cycle||1);if(Number(row.research_cycle||0)!==cycle)throw new Error('human_invite_stale_cycle');
+ const fpHash=requestFingerprint?await sha256Hex(`${row.project_id}|${requestFingerprint}`):null;
+ if(row.status==='used'&&row.request_fingerprint_hash&&fpHash&&String(row.request_fingerprint_hash)!==String(fpHash))throw new Error('human_invite_device_mismatch');
+ const derived=await sha256Hex(`human-login|${row.project_id}|${cycle}|${row.subject_hash||row.id}|${row.id}`);
+ const participant=String(row.participant_hash||`hp_${derived.slice(0,32)}`);
+ if(row.status==='unused')await run(env.DB,`UPDATE reviewer_invites SET status='used',participant_hash=?,request_fingerprint_hash=?,used_at=? WHERE id=? AND status='unused'`,[participant,fpHash,nowIso(),row.id]);
+ const check=await one(env.DB,`SELECT status,participant_hash,request_fingerprint_hash FROM reviewer_invites WHERE id=?`,[row.id]);
+ if(check?.status!=='used'||String(check?.participant_hash||'')!==participant)throw new Error('human_invite_binding_failed');
+ if(check.request_fingerprint_hash&&fpHash&&String(check.request_fingerprint_hash)!==String(fpHash))throw new Error('human_invite_device_mismatch');
+ const sess=await one(env.DB,`SELECT quiz_passed FROM reviewer_sessions WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[row.project_id,participant,HUMAN_PROTOCOL,cycle]);
+ const session_token=Number(sess?.quiz_passed||0)===1?await issueSessionToken(env,row.project_id,participant,cycle):null;
+ return {status:session_token?'READY':'QUIZ_REQUIRED',project_id:row.project_id,project_name:row.project_name||'DCV Research',research_cycle:cycle,evidence_revision:Number(row.current_revision||0),protocol:HUMAN_PROTOCOL,participant_hash:participant,participant_label:`P-${derived.slice(0,8).toUpperCase()}`,invite_label:row.label||null,quiz_required:!session_token,session_token};
+}
+
 export async function issueHumanInvite(env,projectId,{label=null,subject_key=null}={}){
  const p=await one(env.DB,'SELECT research_cycle FROM projects WHERE id=?',[projectId]);if(!p)throw new Error('project_not_found');
  const token=`hi_${crypto.randomUUID()}_${crypto.randomUUID()}`,hash=await sha256Hex(token),id=uid('hinv'),subjectHash=await sha256Hex(String(subject_key||id));

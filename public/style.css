@@ -731,3 +731,46 @@ body{background:var(--cw-bg)!important;color:var(--cw-ink)!important;overflow-x:
 
 .participant-session{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;margin:10px 0 12px;border:1px solid var(--line,#d9e3ee);border-radius:12px;background:rgba(245,249,253,.75)}
 .participant-session>div{display:flex;min-width:0;flex-direction:column;gap:2px}.participant-session small,.participant-session span{font-size:12px;color:var(--muted,#687789)}.participant-session b{font-size:15px;letter-spacing:.03em;color:var(--ink,#102a43)}.participant-session .btn-sm{white-space:nowrap;padding:7px 10px}.participant-note{display:block;margin-top:9px;line-height:1.45;color:var(--muted,#687789)}
+
+/* ======================================================================
+   v0.9.0 · participant invite-login + mobile layout stabilization
+   ====================================================================== */
+.human-login-chip{height:42px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #cfe1ed;background:#f8fbff;color:#0b5f88;border-radius:12px;padding:0 12px;font-size:.76rem;font-weight:750;white-space:nowrap}
+.human-login-chip:hover{background:#eef8ff;border-color:#9fd4eb;color:#075376}
+.detail-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;min-width:0}
+.detail-actions .btn-ghost,.detail-actions .btn-future{white-space:nowrap;word-break:keep-all;overflow-wrap:normal;min-width:max-content}
+.human-admin-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin:10px 0}
+.invite-issue-result{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0;padding:11px 12px;border:1px solid #bfe2d7;border-radius:12px;background:#f0fbf7;color:#164e3f;min-width:0}
+.invite-issue-result>div{min-width:0;display:grid;gap:2px}.invite-issue-result small{font-size:.68rem;color:#4d746a}.invite-issue-result code{display:block;max-width:100%;font-size:.73rem;color:#075f4b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.invite-issue-result span{font-size:.64rem;color:#69857e}
+.human-login-ok{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:10px;background:#ecfdf5;color:#047857;font-size:.78rem}
+.human-portal{max-width:880px;margin:0 auto 18px}.human-portal-card{background:#fff;border:1px solid #dce8f0;border-radius:18px;box-shadow:0 18px 55px rgba(26,71,102,.10);padding:22px}.human-portal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:16px}.human-portal-head span{font-size:.64rem;letter-spacing:.16em;color:#2581ad;font-weight:800}.human-portal-head h2{font-size:1.35rem;margin:5px 0 3px;color:#12324c}.human-portal-head p{margin:0;color:#6a7f90;font-size:.78rem}.human-portal-status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:14px}.human-portal-status>div{padding:11px 12px;border-radius:11px;background:#f6faff;border:1px solid #e3edf4;min-width:0}.human-portal-status small{display:block;color:#8193a0;font-size:.64rem}.human-portal-status b{display:block;color:#183b57;font-size:.84rem;overflow-wrap:anywhere}.human-mode #humanPortal{display:block!important}.human-mode #currentResearchBrief,.human-mode #workflowRibbon,.human-mode #stats,.human-mode #computeSection,.human-mode #projectsSection,.human-mode #detailPanel,.human-mode #reportSection,.human-mode .hero-panel{display:none!important}.human-mode .dcv-shell{padding-top:88px!important}.human-mode .dcv-topnav{display:none!important}
+
+/* Long diagnostic/preformatted text should wrap inside cards instead of widening the page. */
+.report-view,.official-status,.fdic-status{white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;max-width:100%!important}
+#externalMatrixBadge{width:auto!important;height:auto!important;min-width:0!important;flex:0 0 auto!important;border-radius:999px!important;white-space:nowrap!important}
+.ext-matrix-box>.d-flex,.ext-funnel-box>.d-flex,.official-box>.d-flex,.fdic-box>.d-flex{flex-wrap:wrap!important}
+
+/* Data tables never compress columns until their text overlaps. They scroll instead. */
+.fdic-rank-table,.matrix-table,.wb-table{table-layout:auto!important}
+.fdic-rank-table th,.fdic-rank-table td,.matrix-table th,.matrix-table td,.wb-table th,.wb-table td{white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important}
+.fdic-ranking,.matrix-table-wrap,.table-responsive{max-width:100%!important;overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+.fdic-rank-table{min-width:760px!important}.matrix-table{min-width:760px!important}.wb-table{min-width:680px!important}
+
+@media(max-width:991.98px){
+  #detailPanel>.panel-head{display:grid!important;grid-template-columns:1fr!important;align-items:start!important}
+  .detail-actions{justify-content:flex-start;width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .detail-actions .btn-ghost,.detail-actions .btn-future{width:100%;min-width:0;white-space:normal!important;word-break:keep-all!important;line-height:1.3;padding:9px 8px!important}
+}
+@media(max-width:767.98px){
+  .navbar-brand{gap:8px!important;margin-left:6px!important}.navbar-brand .brand-mark{width:38px;height:38px}.navbar-brand b{font-size:1.25rem}
+  .human-login-chip{width:42px;padding:0}.human-login-chip span{display:none!important}
+  .profile-chip{width:52px;padding:3px 7px;justify-content:center}.profile-chip .avatar{width:34px;height:34px}
+  #detailPanel>.panel-head{gap:12px!important}.detail-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .detail-actions .btn-ghost,.detail-actions .btn-future{font-size:.78rem!important;min-height:46px}
+  .human-admin-actions{grid-template-columns:1fr}.participant-session{align-items:flex-start;flex-direction:column}.participant-session .btn-sm{width:100%}
+  .human-portal-card{padding:16px 14px;border-radius:14px}.human-portal-head{flex-direction:column}.human-portal-head .btn-ghost{width:100%}.human-portal-status{grid-template-columns:1fr}
+  .fdic-rank-table{min-width:720px!important}.matrix-table{min-width:720px!important}.wb-table{min-width:640px!important}
+  .fdic-rank-head{align-items:flex-start;flex-direction:column}.fdic-rank-head small{line-height:1.4}
+  .matrix-table-wrap{border-radius:9px!important}.matrix-table th,.matrix-table td,.fdic-rank-table th,.fdic-rank-table td{padding:8px 10px!important;font-size:.72rem!important}
+  .subpanel h3,.panel-head b{overflow-wrap:anywhere;word-break:keep-all}
+}

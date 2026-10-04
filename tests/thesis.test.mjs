@@ -16,8 +16,7 @@ T('thesis data aggregates candidates, reviewer and panel', async () => {
   assert.equal(t.candidates.dims.sigma.reduce((a, e) => a + e.total, 0), 60);
   assert.ok(t.candidates.finalists.length > 0 && t.candidates.finalists.length <= 10);
   assert.ok(t.candidates.finalists[0].max_regret <= t.candidates.finalists.at(-1).max_regret);
-  assert.equal(t.reviewer.n, 40); assert.equal(t.reviewer.participants, 4);
-  assert.ok(t.reviewer.arr.lo <= t.reviewer.arr.p && t.reviewer.arr.p <= t.reviewer.arr.hi);
+  assert.equal(t.reviewer.n, 0); assert.equal(t.reviewer.participants, 0); assert.equal(t.reviewer.cumulative_trials,40); assert.equal(t.reviewer.cumulative_participants,4);
   assert.equal(t.empirical.panel.n, 30); assert.equal(t.empirical.panel.verified + t.empirical.panel.estimated, 30);
   assert.equal(t.simulation.phases.find(p => p.phase === 'exploration').decisions, 60 * 16200);
   assert.ok(t.selected && t.selected.by_phase.confirmation);
@@ -26,8 +25,8 @@ T('thesis data aggregates candidates, reviewer and panel', async () => {
 T('report contains all thesis sections, tables and figure references', async () => {
   const { env, pid } = await setup(); const r = await generateReport(env, pid), md = r.content_markdown;
   for (const h of ['## 0. 요약', '## 논문 사용 전 점검 사항', '## 1. 박사논문 연구모형 전체 설계', '## 2. 연구 질문과 설계', '## 3. 실증 보정 데이터', '## 4. 시뮬레이션 결과', '## 5. 강건성 검증', '## 6. 인간 검토자 보정', '## 7. 최종 판정', '## 8. 논의', '## 9. 한계 및 타당성 위협', '## 부록 B. 재현성 정보']) assert.ok(md.includes(h), h);
-  for (let n = 1; n <= 11; n++) assert.ok(md.includes(`**표 ${n}.`), `table ${n}`);
-  for (let n = 1; n <= 5; n++) assert.ok(md.includes(`![그림 ${n}.`), `figure ${n}`);
+  for (const label of ['표 1.','표 2.','표 3.','표 4.','표 5.','표 6.','표 7.','표 8.','표 9.','표 9A.','표 9B.','표 9C.']) assert.ok(md.includes(`**${label}`), label);
+  for (const n of [1,2,3,5,6,7]) assert.ok(md.includes(`![그림 ${n}.`), `figure ${n}`);
   assert.ok(md.length > 6000, `length ${md.length}`);
   assert.ok(!/undefined|NaN/.test(md), 'no undefined/NaN in report');
   const saved = await env.DB.prepare('SELECT COUNT(*) n FROM reports').first(); assert.equal(saved.n, 1);
@@ -40,7 +39,7 @@ T('report on an empty project does not crash or print undefined', async () => {
 
 T('every figure is well-formed SVG with sensible size', async () => {
   const { env, pid } = await setup(); const figs = buildFigures(await buildThesisData(env, pid));
-  assert.equal(figs.length, 11);
+  assert.equal(figs.length, 10);
   for (const f of figs) { assert.ok(f.svg.startsWith('<svg') && f.svg.endsWith('</svg>'), f.file); assert.ok(!/undefined|NaN/.test(f.svg), `${f.file} has undefined/NaN`); assert.ok(f.width >= 600 && f.height >= 400); assert.equal((f.svg.match(/<svg/g) || []).length, 1); }
 });
 

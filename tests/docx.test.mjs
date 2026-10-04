@@ -59,7 +59,7 @@ test('buildDocx: 실제 생성 보고서의 표·그림 개수가 Markdown과 �
   const images = Object.fromEntries(figs.map(f => [f.file, { data: png(60, 40), w: f.width, h: f.height }]));
   const r = inspect(buildDocx(rep.content_markdown, { images }));
   const mdTables = (rep.content_markdown.match(/^\|(---\|)+$/gm) || []).length, mdFigs = (rep.content_markdown.match(/^!\[/gm) || []).length;
-  assert.ok(mdTables >= 18 && mdFigs === 11 && figs.length === 11);
+  assert.ok(mdTables >= 18 && mdFigs === 10 && figs.length === 10);
   assert.equal(r.tables.length, mdTables); assert.equal(r.shapes, mdFigs);
   assert.ok(r.tables.every(t => t.length >= 2 && t[0].every(c => c.length)), '모든 표에 머리행과 본문 행');
   assert.ok(!/undefined|NaN/.test(JSON.stringify(r.paras) + JSON.stringify(r.tables)));

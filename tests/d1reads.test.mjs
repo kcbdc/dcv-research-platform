@@ -132,7 +132,7 @@ test('buildThesisData scans simulation_runs and reviewer_observations once each 
 test('reviewer observation counter: POST increments it atomically and project detail reads it without a COUNT scan', async () => {
   const db = makeDb(), env = { DB: db, ADMIN_TOKEN: 't', ASSETS: { fetch: async () => new Response('x') } }; await project(db);
   const call = (path, init = {}) => worker.fetch(new Request('https://x' + path, { ...init, headers: { authorization: 'Bearer t', 'content-type': 'application/json' } }), env, { waitUntil() {} });
-  for (let i = 0; i < 3; i++) { const r = await call('/api/projects/p1/reviewer-observations', { method: 'POST', body: JSON.stringify({ participant_hash: 'a' + i, ai_confidence: .7, ai_correct: true, human_accept: true, response_ms: 500 }) }); assert.equal(r.status, 201); }
+  for (let i = 0; i < 3; i++) { const r = await call('/api/projects/p1/reviewer-observations-legacy', { method: 'POST', body: JSON.stringify({ participant_hash: 'a' + i, ai_confidence: .7, ai_correct: true, human_accept: true, response_ms: 500 }) }); assert.equal(r.status, 201); }
   assert.equal(db.raw.prepare(`SELECT reviewer_obs_count n FROM projects WHERE id='p1'`).get().n, 3);
   const d = await (await call('/api/projects/p1')).json(); assert.equal(d.human_reviews, 3);
   const list = await (await call('/api/projects')).json(); assert.equal(list.projects[0].candidate_count, 0);

@@ -1,3 +1,38 @@
+# v0.8.8 External-validity claim gate
+
+- Added a dedicated external-validity evidence registry for real public-payment datasets and external evaluations.
+- Case B aggregate/context observations can raise claim scope only to contextual relevance, never outcome validity.
+- Outcome-validity claims require a verified actual public-payment dataset with explicit ground truth plus a hashed PASS evaluation.
+- Independent external-replication claims additionally require an independent data source and non-DCV implementation.
+- Approval evidence scope, thesis/report data, Claim Scope Matrix, and CSV exports now carry the external-validity grade.
+- Added migration `0026_external_validity_claim_gate.sql` and five regression tests.
+- Full test suite: 206/206 PASS.
+
+# v0.8.7 Runtime attestation & confirmatory GLMM export
+
+- Every new simulation artifact records the exact frozen research protocol hash used at execution time.
+- Doctoral HARD gate now rejects confirmation evidence whose runtime protocol hash is missing or differs from the frozen protocol.
+- Added admin `GET /api/projects/:id/reviewer-glmm-package` with QC-eligible trial-level CSV, SHA-256 data hash, and an R/lme4 confirmatory GLMM script.
+- Full test suite: 201/201 PASS.
+
+# v0.8.6 Realized-evidence rigor upgrade
+
+- Doctoral HARD gates now inspect realized human sample/discrimination, actual confirmation episode counts, actual queue_v1 execution, and zero post-start definition changes.
+- Threshold calibration no longer auto-applies prior-cycle q90; added broad-candidate threshold sensitivity curves.
+- Exploration/refinement/confirmation use a fitted human reviewer model when available, otherwise a preregistered degraded-reviewer condition.
+- Added one-time server-issued human invite tokens bound to a hashed external subject key and first request fingerprint, server-side response timing, interleaved attention checks, and five-item understanding quiz.
+- Report terminology changed from independent replication to preregistered internal holdout resampling.
+
+# Changelog
+
+## 0.8.2
+- Hardened participant/admin authentication and protocol hashing.
+- Added noisy-cue human task, separate attention checks, and minimum discrimination-effect gate.
+- Added confidence-stratified reviewer behavior and participant heterogeneity to simulation.
+- Tightened exploratory boundary constraints and applied them during v3 rebalance.
+- Disabled untrusted no-trial reviewer observation ingestion for current protocol.
+- Cleared v0.8.x test regressions; full suite passes.
+
 ## 0.7.8
 - 인간실험 참가자 세션을 프로젝트·연구주기별로 분리해 동일 브라우저의 참가자 식별자 고정 버그 수정
 - 실제 다른 참가자가 시작할 때 사용할 `새 참가자 시작` UI와 현재 세션/현재 분석 참가자/누적 참가자 표시 추가
@@ -373,3 +408,25 @@
 - Dashboard funnel에 ‘현재 프로젝트 실제 결과 / 예시값 없음’ 메타 라벨 추가.
 - Report 5.2/표 9C에 현재 snapshot의 실제 계산값만 사용함을 명시.
 - Validation Matrix API가 project_name/generated_at/basis=CURRENT_PROJECT_ONLY를 반환.
+
+## 0.8.3
+- Added prior-cycle quantile-based constraint calibration and CSV CLI.
+- Added admin preview/apply endpoints that force a new evidence cycle; same-cycle calibration is blocked.
+- Fixed constraint persistence in evidence-driven config updates.
+- Fixed engine use of `loss_max` (previous code looked for legacy `loss_mean_max`).
+- Hardened participant/admin route separation and human-session header handling.
+- 188/188 tests pass.
+
+## 0.8.4
+- Doctoral rigor hard gate before computational confirmation.
+- Orthogonality, protocol timing, seed-family independence, delay queue, human effect-size gate, confirmatory sample-size checks.
+- Added rigor API and report section.
+
+## 0.8.5 — Independent replication cycle
+- Added preregistered one-candidate independent replication cycle after scientific sign-off.
+- Locked source candidate, constraints, source protocol hash, sample size, seed namespace and scenario namespace before replication execution.
+- Replication skips exploratory selection and starts directly at confirmation with a disjoint deterministic seed family.
+- Added deterministic holdout perturbation scenario bundle for replication confirmation/recompute.
+- Human replication requires a fresh participant sample with zero participant overlap with the source cycle.
+- Added replication-specific doctoral HARD gates and report section 6C.
+- Added `/api/projects/:id/replication` and `/api/projects/:id/replication/start` administrator endpoints.

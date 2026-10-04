@@ -1,6 +1,15 @@
-# DCV Research Platform v0.5.21
+# DCV Research Platform v0.8.8
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
+
+## v0.8.8 External-validity claim gate
+
+- 실제 공공 지급결제 데이터의 존재와 결과 라벨(ground truth), 외부평가 실행, 독립 구현 여부를 별도 증거계층으로 관리합니다.
+- 열린재정·e나라도움의 Case B 집계자료만 존재하면 `CONTEXTUAL_PUBLIC_PAYMENT`까지만 허용하며 결과 외적 타당성을 주장하지 않습니다.
+- 결과 라벨이 있는 검증된 실제 지급결제 데이터와 SHA-256으로 고정된 외부평가가 있어야 `OUTCOME_VALIDATED_PUBLIC_PAYMENT`로 상승합니다.
+- 독립 데이터 원천과 비-DCV 구현까지 확인된 경우에만 `INDEPENDENT_EXTERNAL_REPLICATION`을 허용합니다.
+- 보고서 Claim Scope Matrix와 계산 승인 basis가 이 게이트를 자동 반영합니다.
+
 
 ## v0.5.15 Light Research Console UI
 

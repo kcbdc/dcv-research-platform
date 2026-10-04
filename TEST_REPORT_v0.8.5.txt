@@ -1,0 +1,9 @@
+DCV Research Platform v0.8.5 — Independent Replication
+Test command: npm test
+Result: 196 passed / 0 failed / 0 skipped
+Lab source bundle: regenerated with npm run lab:bundle (65 scientific source/schema files)
+Key replication regression coverage:
+- durable replication ledger migration
+- deterministic preregistered holdout scenario generation
+- replication-specific doctoral HARD gates
+- source-cycle participant exclusion for fresh human replication sample

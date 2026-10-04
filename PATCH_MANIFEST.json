@@ -1,114 +1,80 @@
 {
-  ".gitignore": {
-    "bytes": 163,
-    "sha256": "c4d681b93e4b105521544f2de5607716c153baad17c83db5939ebbdea26b79f1"
-  },
-  "package.json": {
-    "bytes": 1096,
-    "sha256": "78fc1a193645992c31edb1fe8584055c0b1c98ea69763518e287ee5e8c5b9b28"
-  },
-  "package-lock.json": {
-    "bytes": 51712,
-    "sha256": "6acde9efa09e6624859e84b7c74e30dec028b770e4a2b99ec59a0fc97425174a"
-  },
-  "public/index.html": {
-    "bytes": 21830,
-    "sha256": "6dfb03a5870dab7d718031c5a6faee26ae1e72113beaf5ca575e7c07458cb508"
-  },
-  "public/app.js": {
-    "bytes": 59214,
-    "sha256": "a81ecd57d256de737884c14b5d708cea2075b0acb06ce7c8dbc865d35531ce58"
-  },
-  "public/model.js": {
-    "bytes": 26709,
-    "sha256": "4fa0bb652a4e05c1447c42e199603d70f24d7ba6dd1b0eb543c6f4362c34c30d"
-  },
-  "public/redesign.js": {
-    "bytes": 2898,
-    "sha256": "180d40972f7eabf9292d418937af6dd9e36532cc3a1b2e7bc6cd346572769f21"
-  },
-  "src/index.js": {
-    "bytes": 26338,
-    "sha256": "24408650c865b68c2c409c4906c203e2d262b5b352ebc0668c7d3eb42b52eb9a"
-  },
-  "src/lib/compute.js": {
-    "bytes": 41250,
-    "sha256": "f12499efb5853945f720c17afc4f0b6f84915755ad8e2bd34d328577cf214eb3"
-  },
-  "src/lib/define.js": {
-    "bytes": 4311,
-    "sha256": "aabc793199dd6fb0817db7375a893c0e0d0cf83a94ccb75766e7d0feed8f7a9d"
-  },
-  "src/lib/reviewer.js": {
-    "bytes": 6933,
-    "sha256": "9f5711fd82e612156ab3fb4d1848442ee23d71cd534b26952091d2d70f2804a5"
-  },
-  "src/lib/human_trials.js": {
-    "bytes": 3916,
-    "sha256": "ad1be728ee2e98281005f2ef75b48829c0eea6115519ef2dd8728d0add35aaa4"
-  },
-  "src/lib/redesign.js": {
-    "bytes": 4222,
-    "sha256": "2071ba5d838be01e056efe9789a4a17c7abfccfe9c0d3e1ca71ed2d577e4bb04"
-  },
-  "src/lib/rigor.js": {
-    "bytes": 7614,
-    "sha256": "66f90f10b836a7afa864668750bbeb8cd0b205015c9593fc3065fbc62abc78ea"
-  },
-  "src/lib/evidence.js": {
-    "bytes": 7351,
-    "sha256": "01ae7e93bd311af72eb6666f39ce8aabe6732c930f754675f2188d3d3dd0a69a"
-  },
-  "src/lib/db.js": {
-    "bytes": 7659,
-    "sha256": "ff1c3467885c72d144b11c3f2b02a5d86d8e421bc3943cbd25a5879a2b8d5204"
-  },
-  "src/lib/thesis.js": {
-    "bytes": 36825,
-    "sha256": "495f6a7f8bb1d8da257a465c57349da2b03190b59fef61edfcb626950f54e127"
-  },
-  "src/lib/report.js": {
-    "bytes": 37559,
-    "sha256": "b7ff4f37428acb800496a8dfa2fe3db661bc0676cb332f23552bf2853845392e"
-  },
-  "src/lib/util.js": {
-    "bytes": 1996,
-    "sha256": "2e29ce3af3c4d9442195bf5a6885c561078eebd61d5821fd8dce970e028f0e47"
-  },
-  "src/lib/lab_evidence.js": {
-    "bytes": 9065,
-    "sha256": "00eac96b2a3a54ca90205820a235969647847155a82b4c4da0fa496d8f38f769"
-  },
-  "src/lib/lab_code_bundle.js": {
-    "bytes": 461483,
-    "sha256": "43dc8565c6d83140e79f42135d4f16bdbc143101792b8b007bc38c21c8195d4c"
-  },
-  "migrations/0019_research_redesign.sql": {
-    "bytes": 898,
-    "sha256": "80bf5b121d17f7d4357c183528b465329516bf3f64f3a602aa10af97ae775bb6"
-  },
-  "data/redesign_candidates.csv": {
-    "bytes": 11312,
-    "sha256": "3748dc68b790a369b2e193918389f73e94617644addfbd81f155e9a8104afa97"
-  },
-  "scripts/audit-redesign.mjs": {
-    "bytes": 3862,
-    "sha256": "1e0e989ffcb037e778468bfbe04982670041567748908e25bec19596345042d1"
-  },
-  "tests/redesign.test.mjs": {
-    "bytes": 7038,
-    "sha256": "dafb27ef0ee33d1cdba7cd47a67c2cb20a8a222b46e726a04a0d78bb014869be"
-  },
-  "docs/research-redesign-0.6.1.md": {
-    "bytes": 7230,
-    "sha256": "0604114b96c8ac61eedebf02f318656c4a3fdb0f15450db49077483a1dca15aa"
-  },
-  "docs/redesign-preview.png": {
-    "bytes": 75896,
-    "sha256": "e1e96aab439c0f9a0d4085c87064052efd3bd6179f854a6e43479f602a7550dd"
-  },
-  "docs/redesign-changed-files.md": {
-    "bytes": 1491,
-    "sha256": "595849acdaa4de155cc844f2fc06d61354a481619b4b087c9e0e31716cefb3f7"
-  }
+  "version": "0.8.8",
+  "modified_files": [
+    {
+      "path": "src/lib/external_validity.js",
+      "sha256": "887863f9b3bff671bee75a08aba331262b62473f22a565ddc3b012789dd062ba",
+      "bytes": 8072
+    },
+    {
+      "path": "src/index.js",
+      "sha256": "538a9a8674846abc3212e0b7a3b551635d4990442825c78f2970fb4151406f15",
+      "bytes": 39803
+    },
+    {
+      "path": "src/lib/thesis.js",
+      "sha256": "960cdb25147e14f5ed9de59149d53ac162c27cee881f16c10ffb529ec9dbfab6",
+      "bytes": 42671
+    },
+    {
+      "path": "src/lib/approve.js",
+      "sha256": "9cf194c39b14c5434305906f6d9f2a419a3ad28af317cccb9f8a00fcdc5946d8",
+      "bytes": 6469
+    },
+    {
+      "path": "src/lib/report.js",
+      "sha256": "9b75f1a944631c05d3005bc4f9c3682efef0809ec3521c9f691535b54bd21826",
+      "bytes": 46365
+    },
+    {
+      "path": "src/lib/util.js",
+      "sha256": "183348ef0967f18a9f1838f54d455dfa427afc5207f575abe5dfd5e5550eb2cd",
+      "bytes": 1973
+    },
+    {
+      "path": "src/lib/lab_code_bundle.js",
+      "sha256": "d93f2872058f5a26c8273d8bb2121c24e0c9a566f8609634cd329b95880eea3b",
+      "bytes": 612407
+    },
+    {
+      "path": "migrations/0026_external_validity_claim_gate.sql",
+      "sha256": "aa4e63176c55c25ad7adb07f90c98ed80a496b74980a150756af098bdbcd4185",
+      "bytes": 1815
+    },
+    {
+      "path": "tests/v088_external_validity.test.mjs",
+      "sha256": "21d0a5489e5960980c2e6b6a7930be39ec71840c0ff948a29d081a5f99800f75",
+      "bytes": 2750
+    },
+    {
+      "path": "package.json",
+      "sha256": "9ac7edabc1a5363304cf8ac6f6fd329548247ac493c2db641cf29fec47a1fcee",
+      "bytes": 1272
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "d1185f8b33c508d4897b5556b096a7e95beb1e066d0a45770f0be3469e0f8a47",
+      "bytes": 49468
+    },
+    {
+      "path": "README.md",
+      "sha256": "28eaaf6c707c5c054a1be852d2b0270fc92d77e5b82faea53c61905c1d8ffc5d",
+      "bytes": 17840
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "d1b95d9b8772e872bb790e47c8fa099df41ce56f85a7106983b170e2aa6c2659",
+      "bytes": 41456
+    },
+    {
+      "path": "PATCH_NOTES_v0.8.8.md",
+      "sha256": "3dd7b65dc85bbea0d770e26c452f1312372689f1ea055d71a57424b4820f1a28",
+      "bytes": 1723
+    },
+    {
+      "path": "TEST_REPORT_v0.8.8.txt",
+      "sha256": "445b04ffdd839e50c122cbf782660efcfada6a2ae0627b44b2e50b654366cb31",
+      "bytes": 50966
+    }
+  ]
 }

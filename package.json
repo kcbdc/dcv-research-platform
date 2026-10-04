@@ -1,6 +1,6 @@
 {
   "name": "dcv-research-platform",
-  "version": "0.7.10",
+  "version": "0.8.8",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,7 +20,9 @@
     "redesign:audit": "node scripts/audit-redesign.mjs",
     "lab:bundle": "node scripts/prepare-lab-code.mjs",
     "lab:test": "node --test tests/lab*.test.mjs",
-    "research:actions": "node scripts/actions-runner.mjs"
+    "research:actions": "node scripts/actions-runner.mjs",
+    "constraints:quantiles": "node scripts/constraint-quantiles.mjs",
+    "constraints:sensitivity": "node scripts/constraint-sensitivity.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.41.0"

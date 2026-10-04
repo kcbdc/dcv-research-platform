@@ -72,7 +72,7 @@ export async function advanceProject(env,projectId){
     const ph=String(busy.phase||''); const stage=busy.type==='compute_candidate'?(ph==='historical'||ph==='stress'?'validate':ph==='recompute'?'recompute':'compute'):busy.type==='validate_project'?'validate':'recompute';
     await setStage(env,p,stage); return {stage,waiting:'jobs_in_flight',job_type:busy.type,phase:ph||null};
   }
-  const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
+  const cand=await one(env.DB,`SELECT candidate_total total,candidate_feasible feasible,candidate_active active FROM project_cycle_stats WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
   const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
   await syncReplicationStatus(env,projectId);
   if(!total){
@@ -234,15 +234,16 @@ export async function scheduleAll(env,{process=true}={}){
   // priority 5. Demote it before selecting projects so GitHub can claim compute_candidate
   // first even when the existing advance job causes the project to be omitted below.
   await run(env.DB,`UPDATE jobs SET priority=90,updated_at=? WHERE type='advance_project' AND status='queued' AND priority<90
-    AND EXISTS(SELECT 1 FROM projects p JOIN design_candidates c ON c.project_id=p.id AND c.research_cycle=p.research_cycle
-      WHERE p.id=jobs.project_id AND c.status='pending')`,[new Date().toISOString()]);
+    AND EXISTS(SELECT 1 FROM projects p JOIN project_cycle_stats cs ON cs.project_id=p.id AND cs.research_cycle=p.research_cycle
+      WHERE p.id=jobs.project_id AND cs.candidate_pending>0)`,[new Date().toISOString()]);
   // 완료된 프로젝트는 대상에서 제외(이전: 모든 auto_run 프로젝트에 15분마다 advance + 데이터소스 집계)
   // Two indexed EXISTS probes inside ONE bounded set query replace N per-project reads.
   const ps=await all(env.DB,`SELECT p.id,
-    EXISTS(SELECT 1 FROM design_candidates c WHERE c.project_id=p.id AND c.research_cycle=p.research_cycle AND c.status='pending') pending_compute,
+    CASE WHEN COALESCE(cs.candidate_pending,0)>0 THEN 1 ELSE 0 END pending_compute,
     EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND (s.last_fetched_at IS NULL OR datetime(s.last_fetched_at, '+' || s.cadence_minutes || ' minutes')<=datetime('now'))) due,
     EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='collect_project' AND j.status IN ('queued','running')) collecting
-    FROM projects p WHERE p.auto_run=1 AND (p.status NOT IN ('complete','report_ready') OR EXISTS(SELECT 1 FROM design_candidates c WHERE c.project_id=p.id AND c.research_cycle=p.research_cycle AND c.status='pending'))
+    FROM projects p LEFT JOIN project_cycle_stats cs ON cs.project_id=p.id AND cs.research_cycle=p.research_cycle
+    WHERE p.auto_run=1 AND (p.status NOT IN ('complete','report_ready') OR COALESCE(cs.candidate_pending,0)>0)
     AND (NOT EXISTS(SELECT 1 FROM jobs a WHERE a.project_id=p.id AND a.type='advance_project' AND a.status IN ('queued','running'))
       OR (NOT EXISTS(SELECT 1 FROM jobs b WHERE b.project_id=p.id AND b.type='collect_project' AND b.status IN ('queued','running'))
         AND EXISTS(SELECT 1 FROM data_sources d WHERE d.project_id=p.id AND d.enabled=1 AND (d.last_fetched_at IS NULL OR datetime(d.last_fetched_at, '+' || d.cadence_minutes || ' minutes')<=datetime('now')))))
@@ -252,10 +253,14 @@ export async function scheduleAll(env,{process=true}={}){
     if(p.due&&!p.collecting&&!p.pending_compute)await enqueueOnce(env,p.id,'collect_project',{refresh:true},25);
   }
   // Progress reports are available before human/sign-off gates pass; coalesce pending work.
-  const missingReports=await all(env.DB,`SELECT p.id FROM projects p WHERE p.auto_run=1
+  const missingReports=await all(env.DB,`SELECT p.id FROM projects p
+    LEFT JOIN project_cycle_stats cs ON cs.project_id=p.id AND cs.research_cycle=p.research_cycle
+    WHERE p.auto_run=1
     AND EXISTS(SELECT 1 FROM definitions d WHERE d.project_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM reports r WHERE r.project_id=p.id AND r.research_cycle=p.research_cycle AND r.evidence_revision=p.evidence_revision AND r.stale_at IS NULL
-      AND r.created_at>=COALESCE((SELECT MAX(sr.created_at) FROM simulation_runs sr JOIN design_candidates dc ON dc.id=sr.candidate_id WHERE sr.project_id=p.id AND dc.research_cycle=p.research_cycle),r.created_at))
+      AND r.created_at>=COALESCE(cs.latest_simulation_at,r.created_at))
+    AND NOT EXISTS(SELECT 1 FROM jobs h WHERE h.project_id=p.id AND h.status IN ('queued','running')
+      AND h.type IN ('compute_candidate','validate_project','recompute_project','finalize_recompute'))
     AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='generate_report' AND j.status IN ('queued','running'))
     ORDER BY p.updated_at,p.id LIMIT 4`);
   for(const p of missingReports)await enqueueOnce(env,p.id,'generate_report',{},105);

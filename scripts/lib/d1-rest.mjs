@@ -23,7 +23,7 @@ export function restStatement(sql, params=[]) {
 }
 export function createD1Rest({accountId,databaseId,token,fetchImpl=fetch,intervalMs=650,maxCalls=250,sleep=ms=>new Promise(r=>setTimeout(r,ms))}){
   if(!/^[a-f0-9]{32}$/i.test(accountId||'')||!/^[a-f0-9-]{36}$/i.test(databaseId||'')||!token)throw new Error('Missing or invalid Cloudflare D1 runner credentials');
-  let calls=0,last=0,workCalls=0,controlCalls=0,controlDepth=0;
+  let calls=0,last=0,workCalls=0,controlCalls=0,controlDepth=0,rowsRead=0;
   const query=async statements=>{
     for(let attempt=0;attempt<3;attempt++){
       if(controlDepth?controlCalls>=20:workCalls>=maxCalls)throw new Error(controlDepth?'runner_cleanup_budget_exhausted':'runner_api_budget_exhausted');
@@ -32,6 +32,7 @@ export function createD1Rest({accountId,databaseId,token,fetchImpl=fetch,interva
       if(response.status===429&&attempt<2){await sleep(Math.min(5000,Number(response.headers.get('retry-after')||2)*1000));continue;}
       let json;try{json=await response.json();}catch{throw new RunnerError('D1_RESPONSE_NOT_JSON','Cloudflare returned a non-JSON response.',{http_status:response.status});}
       if(!response.ok||!json.success||!Array.isArray(json.result)||json.result.some(r=>r.success===false))throw diagnoseD1(response.status,json);
+      rowsRead+=json.result.reduce((n,r)=>n+Number(r?.meta?.rows_read||0),0);
       return json.result;
     }
   };
@@ -41,5 +42,5 @@ export function createD1Rest({accountId,databaseId,token,fetchImpl=fetch,interva
     first:async column=>{const row=(await query([restStatement(sql,params)]))[0].results?.[0]??null;return column?row?.[column]??null:row;},
     run:async()=> (await query([restStatement(sql,params)]))[0]
   });
-  return {prepare,batch:async statements=>statements.length?query(statements.map(s=>s._statement())):[],get calls(){return calls;},get remaining(){return Math.max(0,maxCalls-workCalls);},get workCalls(){return workCalls;},async withControl(fn){controlDepth++;try{return await fn();}finally{controlDepth--;}}};
+  return {prepare,batch:async statements=>statements.length?query(statements.map(s=>s._statement())):[],get calls(){return calls;},get remaining(){return Math.max(0,maxCalls-workCalls);},get workCalls(){return workCalls;},get rowsRead(){return rowsRead;},async withControl(fn){controlDepth++;try{return await fn();}finally{controlDepth--;}}};
 }

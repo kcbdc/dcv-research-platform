@@ -29,8 +29,8 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
    ]);progress={jobs:result[0].results||[],candidates:result[1].results||[]};
   }
   const pending=progress?.jobs.some(j=>j.status==='queued'||j.status==='running');
-  return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':pending?'work_remaining':'completed',jobs:completed,failures,progress,d1_api_calls:env.DB.calls,elapsed_seconds:Math.round((Date.now()-started)/1000)};
- }catch(error){if(error.message==='runner_api_budget_exhausted')return {status:'budget_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls};primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{if(env.DB.withControl)await env.DB.withControl(()=>releaseRunner(env,token,completed-failures));else await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError)console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
+  return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':pending?'work_remaining':'completed',jobs:completed,failures,progress,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0),elapsed_seconds:Math.round((Date.now()-started)/1000)};
+ }catch(error){if(error.message==='runner_api_budget_exhausted')return {status:'budget_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0)};primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{if(env.DB.withControl)await env.DB.withControl(()=>releaseRunner(env,token,completed-failures));else await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError)console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
 }
 async function main(){
  let stage='load_configuration';try{
@@ -41,7 +41,7 @@ async function main(){
  const DB=createD1Rest(credentials);
  stage='preflight_d1';await preflightD1(DB);console.log('D1 preflight OK: connection and required tables verified.');
  const env={...cfg.vars,DB,COMPUTE_EXECUTOR:'hybrid',EXTERNAL_RUNTIME:'github-actions',MAX_JOBS_PER_TICK:'1',RUNNER_CODE_REVISION:process.env.GITHUB_SHA||'local',ECOS_API_KEY:process.env.ECOS_API_KEY,OPENFISCAL_API_KEY:process.env.OPENFISCAL_API_KEY,BOJO_API_KEY:process.env.BOJO_API_KEY,FDIC_API_KEY:process.env.FDIC_API_KEY};
- env.RUNNER_JOB_OBSERVER=(type,stage,error)=>console.log(JSON.stringify({stage,job_type:type,d1_api_calls:DB.calls,...(error?{diagnostic:safeDiagnostic(error)}:{})}));
+ env.RUNNER_JOB_OBSERVER=(type,stage,error)=>console.log(JSON.stringify({stage,job_type:type,d1_api_calls:DB.calls,d1_rows_read:Number(DB.rowsRead||0),...(error?{diagnostic:safeDiagnostic(error)}:{})}));
  if(CF_AI_API_TOKEN)env.AI={run:async(model,input)=>{
   const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/run/${model}`,{method:'POST',headers:{authorization:`Bearer ${CF_AI_API_TOKEN}`,'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(55000)});
   const j=await r.json();if(!r.ok||j.success===false)throw new Error(`Workers AI REST failed (${r.status})`);return j.result;

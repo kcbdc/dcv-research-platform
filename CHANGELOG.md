@@ -448,3 +448,8 @@
 - Human replication requires a fresh participant sample with zero participant overlap with the source cycle.
 - Added replication-specific doctoral HARD gates and report section 6C.
 - Added `/api/projects/:id/replication` and `/api/projects/:id/replication/start` administrator endpoints.
+
+## v0.9.2
+- Fixed mobile blank-screen caused by participant-mode visibility depending on Bootstrap `d-none` during mixed/stale asset loads.
+- Stabilized narrow-screen navbar and eliminated page-level horizontal clipping/overflow.
+- Added v0.9.1 cache busting and UI regression tests.

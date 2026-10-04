@@ -4,6 +4,9 @@ import { empiricalReadiness, loadEmpiricalCalibration } from './empirical.js';
 import { nowIso, uid, stableStringify, sha256Hex, safeJson } from './util.js';
 import { cached, bust } from './memo.js';
 
+export const PROTOCOL_SCHEMA='DCV-PROTOCOL-1.3';
+export const ENGINE_VERSION='DCV-CDRS-v4';
+
 export async function buildProtocol(env,projectId){
   const def=await latestDefinition(env,projectId); if(!def) throw new Error('definition_missing');
   const design=def.content.design||{}, constraints=def.content.constraints||{}, validation=def.content.validation||{}, benchmark=def.content.benchmark||{};
@@ -16,7 +19,8 @@ export async function buildProtocol(env,projectId){
   const candidates=await all(env.DB,`SELECT sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator,base_id,pair_seed_key,candidate_role FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator`,[projectId,cycle]);
   const actualPlan=candidates.map(c=>[Number(c.sigma),Number(c.tau),Number(c.alpha),Number(c.authority_k),Number(c.delay_d),Number(c.recovery_w),Number(c.adjust_m),String(c.estimator),c.base_id||null,c.pair_seed_key||null,c.candidate_role||'exploratory']);
   return {
-    schema:'DCV-PROTOCOL-1.2',engine_version:'DCV-CDRS-v3',confidence_method:def.content.benchmark?.confidence_method||'residual_common_v1',noninferiority:def.content.benchmark?.noninferiority||null,human_protocol:validation.human_protocol||'legacy' , project_id:projectId, research_cycle:cycle, definition_version:def.version,
+    schema:PROTOCOL_SCHEMA,engine_version:ENGINE_VERSION,confidence_method:def.content.benchmark?.confidence_method||'residual_common_v1',noninferiority:def.content.benchmark?.noninferiority||null,human_protocol:validation.human_protocol||'legacy' , project_id:projectId, research_cycle:cycle, definition_version:def.version,
+    execution_config:{design,constraints,benchmark,validation},
     research_question:def.content.research_question,
     design_space:design,
     actual_candidate_plan:{count:actualPlan.length,tuples:actualPlan},
@@ -75,9 +79,14 @@ export async function assertProtocolIntegrity(env,projectId,context={}){
   if(!head) return ensureFrozenProtocol(env,projectId);
   const ok=await cached(env,projectId,`integrity:${head.protocol_hash}`,async()=>{
     const latest=await one(env.DB,`SELECT * FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1`,[projectId,cycle]);
+    const frozen=safeJson(latest?.protocol_json,{});
+    // A deployment that changes the executable protocol contract must never keep computing inside
+    // an older frozen cycle. The orchestrator converts this into a new research cycle instead of
+    // retrying dozens of doomed candidate jobs.
+    if(frozen.schema!==PROTOCOL_SCHEMA||frozen.engine_version!==ENGINE_VERSION) throw new Error('protocol_runtime_upgrade_required');
     const current=await buildProtocol(env,projectId), hash=await sha256Hex(stableStringify(current));
     if(hash!==latest.protocol_hash) throw new Error('protocol_integrity_failure');
-    return {...latest,protocol:safeJson(latest.protocol_json,{})};
+    return {...latest,protocol:frozen};
   },INTEGRITY_TTL_MS);
   return ok;
 }

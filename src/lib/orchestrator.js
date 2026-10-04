@@ -26,6 +26,17 @@ async function jobExists(env,projectId,type,phase=null){
 // 모든 자동 단계를 마친 프로젝트 상태. 이 상태에서는 Cron 이 15분마다 advance 를 돌려도 읽을 것이 없다.
 const TERMINAL_STATUSES = new Set(['complete','report_ready']);
 
+async function recoverProtocolCycle(env,projectId,reason){
+  const p=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]);
+  if(!p)return null;
+  const ev=await registerEvidence(env,projectId,{
+    kind:'DESIGN_CHANGE',impact_from:'define',force_new_cycle:true,source:'runtime_protocol_recovery_v0.8.9',
+    detail:{reason,from_cycle:Number(p.research_cycle||1),action:'preserve prior cycle; start fresh cycle under current frozen runtime protocol'}
+  });
+  await audit(env,projectId,'agent','protocol.runtime_recovery','project',projectId,{reason,...ev});
+  return ev;
+}
+
 async function setStage(env,p,stage){
   if(p.current_stage===stage) return;   // 같은 값이면 쓰기 생략
   p.current_stage=stage;
@@ -76,6 +87,12 @@ export async function advanceProject(env,projectId){
 
   // active 후보가 남아 있으면 아직 탐색 중이므로 'unfinished' 작업 조회 없이 바로 반환(조회 1회 절약)
   if(active>0){
+    // A protocol mismatch is permanent for the current frozen cycle. Older builds retried each
+    // pending candidate until max_attempts, leaving UNEVALUATED candidates stranded forever.
+    const poisoned=await one(env.DB,`SELECT 1 x FROM jobs j JOIN design_candidates c ON c.project_id=j.project_id AND c.research_cycle=?
+      WHERE j.project_id=? AND j.type='compute_candidate' AND j.status='failed' AND c.status='pending'
+      AND (j.last_error LIKE '%protocol_integrity_failure%' OR j.last_error LIKE '%protocol_runtime_upgrade_required%' OR j.last_error LIKE '%protocol_drift_after_simulation_start%') LIMIT 1`,[cycle,projectId]);
+    if(poisoned){const recovery=await recoverProtocolCycle(env,projectId,'stranded_pending_protocol_mismatch');return {stage:'protocol_recovery',recovery};}
     // Recover missing initial work in bounded batches. Never restart a completed run or retry permanent failures forever.
     const missing=await all(env.DB,`SELECT c.id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='pending'
       AND NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='exploration')
@@ -184,7 +201,16 @@ async function execute(env,job){
 export async function processJobs(env){
   if(env.COMPUTE_EXECUTOR==='github-actions'&&env.EXTERNAL_RUNTIME!=='github-actions')return [{status:'waiting_for_github_actions'}];
   const jobs=await claimJobs(env,Number(env.MAX_JOBS_PER_TICK||4)); const results=[];
-  for(const job of jobs){ env.RUNNER_JOB_OBSERVER?.(job.type,'job_started');try{ const out=await execute(env,job); await finishJob(env,job);env.RUNNER_JOB_OBSERVER?.(job.type,'job_completed'); results.push({id:job.id,type:job.type,ok:true,out}); } catch(e){ if(e.message==='runner_api_budget_exhausted'&&env.DB.withControl){await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_api_budget' WHERE id=?`,[new Date().toISOString(),new Date().toISOString(),job.id]));results.push({id:job.id,type:job.type,ok:null,deferred:true});break;} env.RUNNER_JOB_OBSERVER?.(job.type,'job_failed',e);await finishJob(env,job,e); results.push({id:job.id,type:job.type,ok:false,error:String(e)}); } }
+  for(const job of jobs){ env.RUNNER_JOB_OBSERVER?.(job.type,'job_started');try{ const out=await execute(env,job); await finishJob(env,job);env.RUNNER_JOB_OBSERVER?.(job.type,'job_completed'); results.push({id:job.id,type:job.type,ok:true,out}); } catch(e){
+    if(e.message==='runner_api_budget_exhausted'&&env.DB.withControl){await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_api_budget' WHERE id=?`,[new Date().toISOString(),new Date().toISOString(),job.id]));results.push({id:job.id,type:job.type,ok:null,deferred:true});break;}
+    if(['protocol_runtime_upgrade_required','protocol_integrity_failure','protocol_drift_after_simulation_start'].includes(e.message)){
+      env.RUNNER_JOB_OBSERVER?.(job.type,'job_protocol_recovery',e);
+      const recovery=await recoverProtocolCycle(env,job.project_id,e.message);
+      // registerEvidence already superseded the running/queued jobs in the old cycle. Do not call
+      // finishJob here, otherwise it would requeue this obsolete job and recreate the deadlock.
+      results.push({id:job.id,type:job.type,ok:true,recovered:true,recovery});break;
+    }
+    env.RUNNER_JOB_OBSERVER?.(job.type,'job_failed',e);await finishJob(env,job,e); results.push({id:job.id,type:job.type,ok:false,error:String(e)}); } }
   return results;
 }
 

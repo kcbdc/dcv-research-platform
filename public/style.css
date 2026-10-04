@@ -957,3 +957,114 @@ html,body,#dashboard,.dcv-shell{width:100%;max-width:100%;min-width:0}
   .chart-wrap{height:280px!important;min-height:280px!important}
   .chart-wrap canvas,#regionCanvas{height:250px!important;min-height:250px!important}
 }
+
+/* ======================================================================
+   v0.9.4 · hard responsive geometry recovery
+   The historical stylesheet contains several desktop grid experiments.
+   Below 1400 CSS px we deliberately collapse the analysis deck to one
+   column and give the canvas an explicit contained height. This final
+   override is intentionally last in the file.
+   ====================================================================== */
+@media (max-width:1399.98px){
+  #computeSection{
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:stretch!important;
+    gap:14px!important;
+    width:100%!important;
+    max-width:100%!important;
+    margin-left:0!important;
+    margin-right:0!important;
+  }
+  #computeSection>.col-12,
+  #computeSection>.col-12:first-child,
+  #computeSection>.col-12:nth-child(2){
+    display:block!important;
+    flex:0 0 auto!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    margin:0!important;
+    padding:0!important;
+  }
+  #computeSection>.col-12:nth-child(2)>.row{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    grid-template-rows:auto auto!important;
+    gap:14px!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    margin:0!important;
+  }
+  #computeSection>.col-12:nth-child(2)>.row>.col-12{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    margin:0!important;
+    padding:0!important;
+  }
+  #computeSection article,#validateSection,#recomputeSection{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:hidden!important;
+  }
+  #computeSection .panel-head{
+    position:static!important;
+    display:flex!important;
+    flex-wrap:wrap!important;
+    align-items:flex-start!important;
+    gap:10px!important;
+    height:auto!important;
+    min-height:0!important;
+  }
+  #computeSection .panel-head>div:first-child{
+    width:auto!important;
+    min-width:0!important;
+    flex:1 1 220px!important;
+  }
+  #computeSection .fig-quick,#computeSection #regionBadge{
+    position:static!important;
+    inset:auto!important;
+    max-width:100%!important;
+  }
+  .chart-wrap{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:hidden!important;
+  }
+  .chart-wrap canvas,#regionCanvas{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:320px!important;
+    min-height:320px!important;
+    max-height:320px!important;
+    flex:none!important;
+  }
+  .chart-legend{display:flex!important;flex-wrap:wrap!important;gap:10px 18px!important;margin-top:10px!important}
+}
+@media (max-width:767.98px){
+  .dcv-shell{padding-left:10px!important;padding-right:10px!important}
+  #computeSection{gap:12px!important}
+  #computeSection>.col-12:nth-child(2)>.row{gap:12px!important}
+  #computeSection .glass-panel{padding:14px!important}
+  #computeSection .panel-head>div:first-child{flex-basis:100%!important}
+  #computeSection .fig-quick{width:100%!important;display:flex!important;gap:6px!important}
+  #computeSection .fig-quick .btn-ghost{flex:0 0 auto!important}
+  .chart-wrap canvas,#regionCanvas{height:280px!important;min-height:280px!important;max-height:280px!important}
+}
+@media (max-width:420px){
+  .chart-wrap canvas,#regionCanvas{height:245px!important;min-height:245px!important;max-height:245px!important}
+}

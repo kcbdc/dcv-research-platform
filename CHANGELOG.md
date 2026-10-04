@@ -459,3 +459,7 @@
 - Fixed mobile blank-screen caused by participant-mode visibility depending on Bootstrap `d-none` during mixed/stale asset loads.
 - Stabilized narrow-screen navbar and eliminated page-level horizontal clipping/overflow.
 - Added v0.9.1 cache busting and UI regression tests.
+
+## 0.9.4
+- Repaired legacy/partial `project_cycle_stats` schemas that lacked `candidate_active`.
+- Hardened compute dashboard responsive geometry and contained the feasible-region canvas.

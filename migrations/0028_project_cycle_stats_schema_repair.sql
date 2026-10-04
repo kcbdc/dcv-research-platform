@@ -1,4 +1,4 @@
--- v0.9.2: D1 Free-tier rows-read optimization.
+-- v0.9.4: repair/rebuild project_cycle_stats after partial or legacy schema installs.
 -- v0.9.4 repair guard: project_cycle_stats is fully derived data.
 -- Older/manual partial tables may exist; rebuild it before the v0.9.2 backfill so
 -- CREATE TABLE IF NOT EXISTS cannot silently preserve an incompatible schema.

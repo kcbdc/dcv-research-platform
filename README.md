@@ -273,3 +273,6 @@ fetch('/api/runner/status',{cache:'no-store'}).then(r=>r.json()).then(console.lo
 ```
 
 `configured:true` and `heavy_due>0` should be followed by `dispatch_cooldown_active:true`, then `runner_active:true` or a newer `last_completed_at`.
+
+## v0.9.4 deployment note
+If D1 reports `project_cycle_stats has no column named candidate_active`, the database has a legacy/partial materialized-stats table. Apply remote migrations; migration 0028 rebuilds this derived table and backfills it from `design_candidates` / `simulation_runs`. No source research records are deleted.

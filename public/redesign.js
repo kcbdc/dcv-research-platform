@@ -5,3 +5,19 @@ $('#redesignBtn')?.addEventListener('click',()=>{
  $('#redesignForm').onsubmit=async e=>{e.preventDefault();const button=$('#redesignSubmit');button.disabled=true;try{const file=$('#redesignFile').files[0];if(!file||file.size>150000)throw new Error('150KB 이하의 208행 CSV를 선택하세요.');const input={csv:await file.text()};if($('#useNoninferiority').checked)input.noninferiority={loss_relative_margin:Number($('#niLoss').value),fn_absolute_margin:Number($('#niFn').value),fp_absolute_margin:Number($('#niFp').value)};const r=await window.DCV.api(`/api/projects/${window.DCV.current()}/redesign`,{method:'POST',body:JSON.stringify(input)});$('#redesignStatus').textContent=`208개 후보를 예약했습니다. 새 연구 Cycle ${r.research_cycle} · Evidence r${r.evidence_revision}.`;window.DCV.toast('재설계가 저장되었습니다. 새 연구 주기로 실행합니다.');}catch(error){$('#redesignStatus').textContent=error.message;}finally{button.disabled=false;}};
  window.DCV.modal('redesignModal').show();
 });
+
+
+$('#balancedRedesignBtn')?.addEventListener('click',async()=>{
+  const projectId=window.DCV?.current();
+  if(!projectId)return;
+  const ok=confirm('현재 후보·실행 기록은 보존하고 새 연구 Cycle에서 4개 추정기 × α 4수준 × W 3수준의 균형요인 설계(v2)를 시작합니다. 기존 인간실험 894건은 legacy_v1로 보존되며 주 분석에서는 제외됩니다. 계속할까요?');
+  if(!ok)return;
+  const button=$('#balancedRedesignBtn');button.disabled=true;
+  try{
+    const r=await window.DCV.api(`/api/projects/${projectId}/rebalance-v2`,{method:'POST',body:'{}'});
+    window.DCV.toast(`균형설계 v2 적용: 연구 Cycle ${r.research_cycle} · Evidence r${r.evidence_revision}`);
+    setTimeout(()=>location.reload(),700);
+  }catch(error){
+    window.DCV.toast(error.message||'균형설계 적용에 실패했습니다.');
+  }finally{button.disabled=false;}
+});

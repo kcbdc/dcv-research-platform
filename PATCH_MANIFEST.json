@@ -1,75 +1,100 @@
 {
-  "version": "0.8.9",
+  "version": "0.10.7",
   "modified_files": [
     {
-      "path": "src/lib/rigor.js",
-      "sha256": "e4d5e9f051edad55f319089ff341c186551f9134d9012feb2ead0af122942bc8",
-      "bytes": 10326
+      "path": "CHANGELOG.md",
+      "sha256": "e4429f92061946863f3916869eab58ef110caa4d9ded64363f65721c26d50a4d",
+      "bytes": 47010
     },
     {
-      "path": "src/lib/compute.js",
-      "sha256": "2fc5625f5e29cc1e076feacf3a029115ef9548eea7377a7295ea953959449d45",
-      "bytes": 55257
+      "path": "D1_PROFILE_v0.10.7.md",
+      "sha256": "0bc5bc0f14c07585e0c6c629371fb2df3c5c09c8005d7fe99b31923f1b1a1ca1",
+      "bytes": 1295
     },
     {
-      "path": "src/lib/orchestrator.js",
-      "sha256": "adf43b4f81b6fa23470011ccc0647176d6c5b433c7c8b1c864886647b8fac1a0",
-      "bytes": 22393
-    },
-    {
-      "path": "scripts/lib/runner-diagnostics.mjs",
-      "sha256": "d37a64463df9264beee6cd521cf9a2d40699ea6325f604b5a13388589e758c98",
-      "bytes": 4812
-    },
-    {
-      "path": "public/app.js",
-      "sha256": "50dccb3cb384aa8c2787e9fbd2d5e7f669e8b5ac78392ebc3211f2f42ca1a51d",
-      "bytes": 66833
-    },
-    {
-      "path": "src/lib/util.js",
-      "sha256": "d8414d5412850f2226365906d2b3c3a86651e6156343803c387ba14759dd96fc",
-      "bytes": 1973
-    },
-    {
-      "path": "src/lib/lab_code_bundle.js",
-      "sha256": "935bd1f29508f31ecc5cae4d2401fde79abc2653201df862c881d9dfe4eea9c1",
-      "bytes": 615515
-    },
-    {
-      "path": "tests/v089_protocol_recovery.test.mjs",
-      "sha256": "c0c1e3851ab1b965365e0d572d8411e7e6e03a08e66ceb817a3bab081d7ce1f9",
-      "bytes": 3862
-    },
-    {
-      "path": "package.json",
-      "sha256": "9d3f72a17d3a7195af142a8448752b1fb940305c42769f23d0bea4195bdd1327",
-      "bytes": 1272
-    },
-    {
-      "path": "package-lock.json",
-      "sha256": "7acabed253683023b1fe89f4554893083b8f19f5b7a285ca1ac4250e67eba7d8",
-      "bytes": 49468
+      "path": "PATCH_NOTES_v0.10.7.md",
+      "sha256": "934bfc6946fe989057bdfc10052e125aca6881e6575ba01ba859b3d014831c3a",
+      "bytes": 3048
     },
     {
       "path": "README.md",
-      "sha256": "bbc361c635bb81f293eb039e83f82e8350e02a19915bd98fb3f99ccb4896853f",
-      "bytes": 17840
+      "sha256": "ecbcd891d09c452320ef3e2b1f3b5aa0572668c6ce0418e7caea4b98124fc18d",
+      "bytes": 19050
     },
     {
-      "path": "CHANGELOG.md",
-      "sha256": "4d010336340cccaf34c1072ea7065d99b5d414019f31a55c7b154e5a501738e7",
-      "bytes": 42053
+      "path": "TEST_REPORT_v0.10.7.txt",
+      "sha256": "5df69e5968586bab40121acb5711de4b7a667ee4dbfdb085b694e2414c4aa8ea",
+      "bytes": 61384
     },
     {
-      "path": "PATCH_NOTES_v0.8.9.md",
-      "sha256": "1835badc7e05557029d37f8933704ef3b471a01642a048d90b15f77fb04d2d3a",
-      "bytes": 1138
+      "path": "package.json",
+      "sha256": "b952fa8999fc94406fb6b79d13df1ebeb44bc702ee9e2d809aef736da1c84823",
+      "bytes": 1335
     },
     {
-      "path": "TEST_REPORT_v0.8.9.txt",
-      "sha256": "453244c0040dec5c23ddb7c0bcd8c7a697b4ad15ef4326b5f204f2f973d38dbb",
-      "bytes": 52066
+      "path": "package-lock.json",
+      "sha256": "cd99f7f6fdf91ae4598499f3bf4a4839efc80cf44051d5cd049febe9ed9bd28a",
+      "bytes": 49470
+    },
+    {
+      "path": "migrations/0031_query_hotpath_compaction.sql",
+      "sha256": "c0fccfae531317a7049a06b115be5fa96ee36c21895a93461286a90a46622c1e",
+      "bytes": 1979
+    },
+    {
+      "path": "src/index.js",
+      "sha256": "388579657e17c53b691a6928ace8d88cafda7536862d2f084c832474598f8d13",
+      "bytes": 43120
+    },
+    {
+      "path": "src/lib/evidence.js",
+      "sha256": "446cc8041906a670b2d61ae5997b440e95b7e6369d95213c2a592d7a78193223",
+      "bytes": 7865
+    },
+    {
+      "path": "src/lib/human_trials.js",
+      "sha256": "d30b15daed9920857e39e35c327763ac163de2e4f1ce1a98d8c74d7a2ad24e3b",
+      "bytes": 22984
+    },
+    {
+      "path": "src/lib/lab_code_bundle.js",
+      "sha256": "dc3951539aad319d382c48be667e3ee76f2e4adc8ca9e5bc47b3eba50c5107a1",
+      "bytes": 656351
+    },
+    {
+      "path": "src/lib/orchestrator.js",
+      "sha256": "4acec06431afc71a743129339dc8ad2d2c990973976cf00da5e171b8280b4cf6",
+      "bytes": 22031
+    },
+    {
+      "path": "src/lib/report.js",
+      "sha256": "348faeabd28165e8c8537cf7b716d52023ced64dfe91ffefd84081214e2b6e1b",
+      "bytes": 48067
+    },
+    {
+      "path": "src/lib/reviewer.js",
+      "sha256": "4b9047d3f763f16c9db9e6bca255fd97581a19732550ea2551bc7afb604a0add",
+      "bytes": 11510
+    },
+    {
+      "path": "src/lib/thesis.js",
+      "sha256": "ca9dca6fa27e028c271cca33ca285026aa385f9c7fa052e51ff5fdce5bc5641c",
+      "bytes": 44254
+    },
+    {
+      "path": "src/lib/util.js",
+      "sha256": "8a2eb0129fce805798d861632638b0b3d51868dabad6965f3e36862668028e98",
+      "bytes": 1974
+    },
+    {
+      "path": "tests/v0107_query_compaction.test.mjs",
+      "sha256": "482f8794aa10d83b0a3b9e7026654bdc0fc9e9a76985d34d4ae056bfe41a3b14",
+      "bytes": 2780
+    },
+    {
+      "path": "docs/lab-verification/submission-fixture.zip",
+      "sha256": "4105c2d593ad7e500c360440dafba8f234261bbc217641e3a043342630a8ed58",
+      "bytes": 242204
     }
   ]
 }

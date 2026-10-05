@@ -251,20 +251,46 @@ export async function buildThesisData(env, projectId) {
   for(const [id,r] of best){const c=cands.find(c=>c.id===id);if(c?.K<=1)continue;const j=safeJson(r.result_json,{});for(const q of j.constraints||[]){const a=constraintCounts.get(q.metric)||{metric:q.metric,n:0,fail:0,boundary:0,pass:0};a.n++;if(q.lo>q.limit)a.fail++;else if(q.hi<=q.limit)a.pass++;else a.boundary++;constraintCounts.set(q.metric,a);}}
   const scenarios={...Object.fromEntries(Object.entries(scenarioSets).map(([key,set])=>[key,set.size])),total:Object.values(scenarioSets).reduce((n,set)=>n+set.size,0),registered:registeredScenarios,basis:'actual stored historical/stress scenario keys; not registered scenario rows'};
   const validationRevisionCounts={current_human:humanValidation.size,other_revision_human:validationRows.filter(v=>v.validation_type==='human_recompute'&&Number(v.evidence_revision||0)!==rev).length};
-  // 인간 검토자: reviewer_observations 를 한 번만 스캔한다(이전: 전체 집계 + 신뢰도별 집계로 2회 스캔).
-  // (신뢰도 구간 × 참가자)로 묶어 가져오면 행 수는 구간수×참가자수로 줄고, 합계·참가자 수·구간별 값을 모두 여기서 만든다.
-  const humanProtocol=content.validation?.human_protocol||null;
-  const humanGroups = await all(env.DB, `SELECT CASE WHEN json_extract(o.context_json,'$.protocol')=? AND json_extract(o.context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(o.context_json,'$.attention_check') AS INTEGER),0)=0 AND COALESCE(CAST(json_extract(o.context_json,'$.quality.trial_eligible') AS INTEGER),0)=1
-      AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=o.project_id AND q.participant_hash=o.participant_hash AND q.protocol_version=? AND q.research_cycle=? AND q.severity='EXCLUDE')
-      AND (SELECT COUNT(*) FROM reviewer_trials rt WHERE rt.project_id=o.project_id AND rt.participant_hash=o.participant_hash AND rt.protocol_version=? AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.status='done')>=30
-      AND (SELECT COUNT(*) FROM reviewer_trials ra WHERE ra.project_id=o.project_id AND ra.participant_hash=o.participant_hash AND ra.protocol_version=? AND ra.research_cycle=? AND ra.trial_phase='attention' AND ra.status='done')>=3
-      THEN 1 ELSE 0 END eligible,
-    ROUND(ai_confidence,2) confidence, participant_hash ph, CASE WHEN json_extract(context_json,'$.protocol')=? THEN 1 ELSE 0 END protocol_current, CASE WHEN json_extract(context_json,'$.protocol') IS NULL OR json_extract(context_json,'$.protocol')='legacy_v1' THEN 1 ELSE 0 END legacy_untagged, COUNT(*) n, SUM(response_ms) rt,
-    SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n, SUM(CASE WHEN ai_correct=1 AND human_accept=1 THEN 1 ELSE 0 END) acc_c,
-    SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n, SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w,
-    SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override,
-    SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate
-    FROM reviewer_observations o WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, protocol_current, legacy_untagged`, [humanProtocol||'main_v2',humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',projectId]);
+  // 인간 검토자: normalized reviewer_trials를 기준으로 현재 cycle/protocol을 판정한다.
+  // v0.10.6 이전 쿼리는 observation마다 json_extract + correlated COUNT 서브쿼리를 반복해
+  // D1 rows_read가 커졌고, 설정값이 바뀌어도 완료 기준을 30/3으로 하드코딩했다.
+  const humanProtocol=content.validation?.human_protocol||'main_v2';
+  const humanMainN=Number(content.validation?.human_main_n||30),humanAttentionN=Number(content.validation?.human_attention_n||3);
+  const humanFastMs=Number(content.validation?.human_fast_ms||800),humanSlowMs=Number(content.validation?.human_slow_ms||60000);
+  const humanGroups = await all(env.DB, `WITH participant_state AS (
+      SELECT rt.participant_hash,
+        SUM(CASE WHEN rt.trial_phase='main' AND rt.status='done' THEN 1 ELSE 0 END) main_n,
+        SUM(CASE WHEN rt.trial_phase='attention' AND rt.status='done' THEN 1 ELSE 0 END) attention_n,
+        EXISTS(SELECT 1 FROM reviewer_quality_flags q
+          WHERE q.project_id=rt.project_id AND q.participant_hash=rt.participant_hash
+            AND q.protocol_version=rt.protocol_version AND q.research_cycle=rt.research_cycle AND q.severity='EXCLUDE') excluded
+      FROM reviewer_trials rt
+      WHERE rt.project_id=? AND rt.protocol_version=? AND rt.research_cycle=?
+      GROUP BY rt.participant_hash
+    ), scoped AS (
+      SELECT o.participant_hash,o.ai_confidence,o.ai_correct,o.human_accept,o.response_ms,o.context_json,
+        rt.id trial_row_id,rt.protocol_version,rt.research_cycle,rt.trial_phase,rt.attention_check,
+        COALESCE(ps.main_n,0) main_n,COALESCE(ps.attention_n,0) attention_n,COALESCE(ps.excluded,0) excluded
+      FROM reviewer_observations o
+      LEFT JOIN reviewer_trials rt ON rt.id=o.trial_id
+      LEFT JOIN participant_state ps ON ps.participant_hash=o.participant_hash
+      WHERE o.project_id=?
+    )
+    SELECT CASE WHEN trial_row_id IS NOT NULL AND protocol_version=? AND research_cycle=? AND trial_phase='main' AND COALESCE(attention_check,0)=0
+        AND response_ms>=? AND response_ms<=? AND main_n>=? AND attention_n>=? AND excluded=0 THEN 1 ELSE 0 END eligible,
+      ROUND(ai_confidence,2) confidence,participant_hash ph,
+      CASE WHEN trial_row_id IS NOT NULL AND protocol_version=? AND research_cycle=? THEN 1 ELSE 0 END protocol_current,
+      CASE WHEN trial_row_id IS NULL AND (json_extract(context_json,'$.protocol') IS NULL OR json_extract(context_json,'$.protocol')='legacy_v1') THEN 1 ELSE 0 END legacy_untagged,
+      COUNT(*) n,SUM(response_ms) rt,
+      SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n,
+      SUM(CASE WHEN ai_correct=1 AND human_accept=1 THEN 1 ELSE 0 END) acc_c,
+      SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n,
+      SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w,
+      SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override,
+      SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate
+    FROM scoped
+    GROUP BY eligible,ROUND(ai_confidence,2),participant_hash,protocol_current,legacy_untagged`,
+    [projectId,humanProtocol,cycle,projectId,humanProtocol,cycle,humanFastMs,humanSlowMs,humanMainN,humanAttentionN,humanProtocol,cycle]);
   const rvRows=humanGroups.filter(r=>Number(r.eligible)===1);
   const cumulativeParticipants=new Set(humanGroups.map(r=>r.ph).filter(p=>p && p!=='anonymous'));
   // Current-protocol participant count is intentionally broader than the publication-analysis

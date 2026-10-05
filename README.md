@@ -285,3 +285,6 @@ If D1 reports `project_cycle_stats has no column named candidate_active`, the da
 
 ### v0.10.0
 인간 검토자 실험에서 미완료 pending trial을 자동 재개하고 내부 오류코드를 한국어 안내로 변환합니다.
+
+### v0.10.7 database/runtime note
+Apply `migrations/0031_query_hotpath_compaction.sql` before deploying v0.10.7. The release compacts D1 hot queries and tightens current-cycle human-evidence scoping without changing deterministic research results. See `PATCH_NOTES_v0.10.7.md` and `D1_PROFILE_v0.10.7.md`.

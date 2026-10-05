@@ -182,11 +182,12 @@ export async function generateReport(env, projectId) {
   const used = ai._ai?.ok === true, pick = (k, fb) => used && (Array.isArray(ai[k]) ? ai[k].length : ai[k]) ? ai[k] : fb;
   const merged = { abstract: base.abstract, discussion: base.discussion, limitations: base.limitations, implications: base.implications, next_steps: base.next_steps };
   const note = used ? `Workers AI (${ai._ai.model})` : `규칙 기반 (AI 호출 실패: ${ai._ai?.error || '알 수 없음'})`;
-  const md = buildMarkdown(t, merged, note), id = uid('report'), p = await one(env.DB, `SELECT name FROM projects WHERE id=?`, [projectId]);
+  const md = buildMarkdown(t, merged, note), id = uid('report');
+  // Re-read only the mutable scope markers after narrative generation; name is already in thesis snapshot.
   const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
   const snapshotCycle=Number(t.project.research_cycle||1),snapshotRevision=Number(t.project.evidence_revision||0);
   const scopeChanged=Number(proj?.research_cycle||1)!==snapshotCycle||Number(proj?.evidence_revision||0)!==snapshotRevision;
-  await run(env.DB, `INSERT INTO reports(id,project_id,kind,title,content_markdown,data_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?)`, [id, projectId, 'paper_summary', `${p?.name || 'DCV'} 연구결과`, md, JSON.stringify({ ai_meta: ai._ai, narrative: merged, checklist: checklist(t), figures: figureCatalog(t), summary: { decision: t.approval?.decision, candidates: t.candidates.total, confirmed: t.candidates.by_class.confirmed, reviewer_n: t.reviewer.n } }), nowIso(),snapshotCycle,snapshotRevision]);
+  await run(env.DB, `INSERT INTO reports(id,project_id,kind,title,content_markdown,data_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?)`, [id, projectId, 'paper_summary', `${t.project?.name || 'DCV'} 연구결과`, md, JSON.stringify({ ai_meta: ai._ai, narrative: merged, checklist: checklist(t), figures: figureCatalog(t), summary: { decision: t.approval?.decision, candidates: t.candidates.total, confirmed: t.candidates.by_class.confirmed, reviewer_n: t.reviewer.n } }), nowIso(),snapshotCycle,snapshotRevision]);
   if(scopeChanged){await run(env.DB,`UPDATE reports SET stale_at=? WHERE id=?`,[nowIso(),id]);return {id,draft:true,stale:true,content_markdown:md,markdown:md};}
   const incomplete=(t.candidates.by_class.unevaluated||0)>0 || !t.candidates.total || !['COMPUTATIONALLY_CONFIRMED','SCIENTIFICALLY_APPROVED'].includes(t.approval?.decision);
   const signed=await one(env.DB, `SELECT id FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL AND decision='SCIENTIFICALLY_APPROVED' ORDER BY created_at DESC LIMIT 1`, [projectId,Number(proj?.research_cycle||1),Number(proj?.evidence_revision||0)]);

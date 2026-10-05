@@ -54,13 +54,25 @@ export function fitMixedLogitApprox(rows,{iterations=220,lambda=4}={}){
 }
 export async function fitReviewerModel(env,projectId){
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
-  const def=await latestDefinition(env,projectId),v=def?.content?.validation||{},protocol=String(v.human_protocol||'main_v2');
-  let rows=await all(env.DB,`SELECT * FROM reviewer_observations WHERE project_id=? AND json_extract(context_json,'$.protocol')=? AND json_extract(context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(context_json,'$.attention_check') AS INTEGER),0)=0 ORDER BY created_at`,[projectId,protocol]);
-  const excluded=await all(env.DB,`SELECT DISTINCT participant_hash,flag_code FROM reviewer_quality_flags WHERE project_id=? AND protocol_version=? AND research_cycle=? AND severity='EXCLUDE'`,[projectId,protocol,Number(p?.research_cycle||1)]);
-  const excludedIds=new Set(excluded.map(x=>String(x.participant_hash)));
-  const completed=await all(env.DB,`SELECT participant_hash,SUM(CASE WHEN trial_phase='main' AND status='done' THEN 1 ELSE 0 END) main_n,SUM(CASE WHEN trial_phase='attention' AND status='done' THEN 1 ELSE 0 END) attention_n FROM reviewer_trials WHERE project_id=? AND protocol_version=? AND research_cycle=? GROUP BY participant_hash HAVING main_n>=? AND attention_n>=?`,[projectId,protocol,Number(p?.research_cycle||1),Number(v.human_main_n||30),Number(v.human_attention_n||3)]);
-  const completedIds=new Set(completed.map(x=>String(x.participant_hash)));
-  rows=rows.filter(r=>completedIds.has(String(r.participant_hash))&&!excludedIds.has(String(r.participant_hash))&&safeJson(r.context_json,{}).quality?.trial_eligible===true);
+  const def=await latestDefinition(env,projectId),v=def?.content?.validation||{},protocol=String(v.human_protocol||'main_v2'),cycle=Number(p?.research_cycle||1);
+  const fastMs=Number(v.human_fast_ms||800),slowMs=Number(v.human_slow_ms||60000),mainRequired=Number(v.human_main_n||30),attentionRequired=Number(v.human_attention_n||3);
+  // Current-cycle, normalized trial metadata is authoritative. This prevents old-cycle rows with the
+  // same protocol string from leaking into the current reviewer model and avoids JSON-expression scans.
+  const state=await all(env.DB,`SELECT rt.participant_hash,
+      SUM(CASE WHEN rt.trial_phase='main' AND rt.status='done' THEN 1 ELSE 0 END) main_n,
+      SUM(CASE WHEN rt.trial_phase='attention' AND rt.status='done' THEN 1 ELSE 0 END) attention_n,
+      EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=rt.project_id AND q.participant_hash=rt.participant_hash AND q.protocol_version=rt.protocol_version AND q.research_cycle=rt.research_cycle AND q.severity='EXCLUDE') excluded
+    FROM reviewer_trials rt
+    WHERE rt.project_id=? AND rt.protocol_version=? AND rt.research_cycle=?
+    GROUP BY rt.participant_hash`,[projectId,protocol,cycle]);
+  const completedIds=new Set(state.filter(x=>Number(x.main_n||0)>=mainRequired&&Number(x.attention_n||0)>=attentionRequired).map(x=>String(x.participant_hash)));
+  const excludedIds=new Set(state.filter(x=>Number(x.excluded||0)===1).map(x=>String(x.participant_hash)));
+  let rows=await all(env.DB,`SELECT o.participant_hash,o.ai_confidence,o.ai_correct,o.human_accept,o.response_ms,o.recovered,o.recovery_ms,o.created_at
+    FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id
+    WHERE o.project_id=? AND rt.project_id=? AND rt.protocol_version=? AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.attention_check=0
+      AND o.response_ms>=? AND o.response_ms<=?
+    ORDER BY o.created_at`,[projectId,projectId,protocol,cycle,fastMs,slowMs]);
+  rows=rows.filter(r=>completedIds.has(String(r.participant_hash))&&!excludedIds.has(String(r.participant_hash)));
   const lastObserved=rows.at(-1)?.created_at??'';
   const minParticipants=Number(v.min_human_participants||32),minCorrect=Number(v.min_human_correct_trials||300),minWrong=Number(v.min_human_wrong_trials||200),B=Math.max(300,Math.min(1000,Number(v.cluster_bootstrap_n||300)));
   const participantN=new Set(rows.map(r=>String(r.participant_hash))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;

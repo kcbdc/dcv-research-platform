@@ -515,3 +515,11 @@
 
 ## v0.10.5
 - D1 free-tier read optimization: indexed source due timestamps, persisted official connector coverage, event-driven scheduler fast path, 30-minute recovery cron, materialized candidate progress counts, and hot-query indexes.
+
+## v0.10.7 — Query Compaction & Integrity Review
+- Compacted evidence snapshots and approval gates to avoid repeated D1 table scans/round-trips.
+- Added denormalized `reviewer_last_observed_at` maintained by trigger, removing scheduler observation polling.
+- Reworked current human participant/model/report queries around normalized current-cycle trial rows.
+- Fixed fast-response QC denominator/numerator mismatch and cross-cycle human evidence leakage.
+- Added hot-path indexes and migration `0031_query_hotpath_compaction.sql`.
+- 249/249 tests pass; deterministic research checksum unchanged; npm audit reports zero vulnerabilities.

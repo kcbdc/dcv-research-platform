@@ -59,8 +59,7 @@ export async function advanceProject(env,projectId){
   if(p.reviewer_hold_marker!==null && p.reviewer_hold_marker!==undefined){
     const model=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? UNION ALL SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending' LIMIT 1`,[projectId,Number(p.research_cycle||1),Number(p.evidence_revision||0),projectId,Number(p.research_cycle||1)]);
     if(!model){
-      const latest=await one(env.DB,`SELECT created_at FROM reviewer_observations WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
-      if((latest?.created_at??'')===p.reviewer_hold_marker) return {stage:'human_review',waiting:'no_new_reviewer_observations'};
+      if((p.reviewer_last_observed_at??'')===p.reviewer_hold_marker) return {stage:'human_review',waiting:'no_new_reviewer_observations'};
     }
   }
 
@@ -133,8 +132,7 @@ export async function advanceProject(env,projectId){
     // 이전: 표본 게이트(참가자 30명, 정답/오답 각 60건)를 통과할 때까지 fit_reviewer ↔ advance_project 가
     //       (HOLD → 900초 뒤 advance → fit_reviewer ...) 무한 반복하며 매번 reviewer_observations 를 읽었다.
     // 이후: 마지막 HOLD 이후 새 관측이 없으면 대기. 새 관측은 POST /reviewer-observations 가 advance 를 깨운다.
-    const latestObs=await one(env.DB,`SELECT created_at FROM reviewer_observations WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
-    const marker=latestObs?.created_at??'';
+    const marker=p.reviewer_last_observed_at??'';
     if(p.reviewer_hold_marker!==null && p.reviewer_hold_marker!==undefined && p.reviewer_hold_marker===marker){
       await setStage(env,p,'validate');
       return {stage:'human_review',waiting:'no_new_reviewer_observations'};

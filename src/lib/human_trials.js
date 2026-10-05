@@ -149,18 +149,30 @@ export async function recordHumanTrial(env,projectId,b,sessionToken=null){
  const rs=await env.DB.batch([
   env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at,trial_id) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM reviewer_trials WHERE id=? AND status='pending')`).bind(id,projectId,b.participant_hash,t.confidence,t.ai_correct,b.human_accept?1:0,serverMs,recovered?1:0,recovered?serverMs:null,JSON.stringify(context),completedAt,t.id,t.id),
   env.DB.prepare("UPDATE reviewer_trials SET status='done',completed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)").bind(completedAt,t.id,id),
-  env.DB.prepare('UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,reviewer_hold_marker=NULL WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)').bind(projectId,id)
+  env.DB.prepare('UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,reviewer_last_observed_at=?,reviewer_hold_marker=NULL WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)').bind(completedAt,projectId,id)
  ]);
  if(!rs[0].meta?.changes)throw new Error('Trial already consumed');
  if(tooFast)await upsertFlag(env,projectId,b.participant_hash,t,'FAST_RESPONSE_TRIAL','WARN',{threshold_ms:settings.fast_ms});
  if(tooSlow)await upsertFlag(env,projectId,b.participant_hash,t,'SLOW_RESPONSE_TRIAL','WARN',{threshold_ms:settings.slow_ms});
  if(attentionFail)await upsertFlag(env,projectId,b.participant_hash,t,'ATTENTION_FAILURE','WARN',{ordinal:t.ordinal});
- const q=await one(env.DB,`SELECT COUNT(*) n,SUM(CASE WHEN CAST(json_extract(o.context_json,'$.quality.too_fast') AS INTEGER)=1 THEN 1 ELSE 0 END) fast,SUM(CASE WHEN CAST(json_extract(o.context_json,'$.quality.attention_fail') AS INTEGER)=1 THEN 1 ELSE 0 END) att FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id WHERE o.project_id=? AND o.participant_hash=? AND rt.protocol_version=?`,[projectId,b.participant_hash,HUMAN_PROTOCOL]);
- const mainN=await one(env.DB,`SELECT COUNT(*) n FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id WHERE o.project_id=? AND o.participant_hash=? AND rt.protocol_version=? AND rt.trial_phase='main'`,[projectId,b.participant_hash,HUMAN_PROTOCOL]);
- if(Number(mainN?.n||0)>=10&&Number(q?.fast||0)/Math.max(1,Number(mainN?.n||0))>settings.max_fast_share)await upsertFlag(env,projectId,b.participant_hash,t,'FAST_RESPONSE_PARTICIPANT','EXCLUDE',{fast:q.fast,n:mainN.n,threshold:settings.max_fast_share});
- if(Number(q?.att||0)>settings.attention_fail_max)await upsertFlag(env,projectId,b.participant_hash,t,'ATTENTION_FAILURE_PARTICIPANT','EXCLUDE',{failed:q.att,max_allowed:settings.attention_fail_max});
- const recent=await all(env.DB,`SELECT o.human_accept FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id WHERE o.project_id=? AND o.participant_hash=? AND rt.protocol_version=? AND rt.trial_phase='main' ORDER BY o.created_at DESC LIMIT 10`,[projectId,b.participant_hash,HUMAN_PROTOCOL]);
- if(recent.length===10&&recent.every(x=>Number(x.human_accept)===Number(recent[0].human_accept)))await upsertFlag(env,projectId,b.participant_hash,t,'STRAIGHTLINE_10','EXCLUDE',{length:10});
+ const qc=await one(env.DB,`WITH scoped AS (
+   SELECT o.human_accept,o.response_ms,o.created_at,rt.trial_phase,rt.attention_check,rt.expected_accept
+   FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id
+   WHERE o.project_id=? AND o.participant_hash=? AND rt.protocol_version=? AND rt.research_cycle=?
+ ), last10 AS (
+   SELECT human_accept FROM scoped WHERE trial_phase='main' ORDER BY created_at DESC LIMIT 10
+ ) SELECT
+   SUM(CASE WHEN trial_phase='main' THEN 1 ELSE 0 END) main_n,
+   SUM(CASE WHEN trial_phase='main' AND response_ms<? THEN 1 ELSE 0 END) fast_main,
+   SUM(CASE WHEN attention_check=1 AND expected_accept IS NOT NULL AND expected_accept<>human_accept THEN 1 ELSE 0 END) attention_fail,
+   (SELECT COUNT(*) FROM last10) last10_n,
+   (SELECT COUNT(DISTINCT human_accept) FROM last10) last10_distinct
+ FROM scoped`,[projectId,b.participant_hash,HUMAN_PROTOCOL,Number(t.research_cycle),settings.fast_ms]);
+ // v0.10.7: fast-share denominator and numerator are both MAIN trials from the same cycle.
+ // The old query counted fast practice/attention trials in the numerator, which could falsely exclude a participant.
+ if(Number(qc?.main_n||0)>=10&&Number(qc?.fast_main||0)/Math.max(1,Number(qc?.main_n||0))>settings.max_fast_share)await upsertFlag(env,projectId,b.participant_hash,t,'FAST_RESPONSE_PARTICIPANT','EXCLUDE',{fast:qc.fast_main,n:qc.main_n,threshold:settings.max_fast_share});
+ if(Number(qc?.attention_fail||0)>settings.attention_fail_max)await upsertFlag(env,projectId,b.participant_hash,t,'ATTENTION_FAILURE_PARTICIPANT','EXCLUDE',{failed:qc.attention_fail,max_allowed:settings.attention_fail_max});
+ if(Number(qc?.last10_n||0)===10&&Number(qc?.last10_distinct||0)===1)await upsertFlag(env,projectId,b.participant_hash,t,'STRAIGHTLINE_10','EXCLUDE',{length:10});
  return {id,correct,recovered,protocol:HUMAN_PROTOCOL,phase:t.trial_phase,response_ms_server:serverMs,response_ms_client:clientMs,feedback:t.trial_phase==='practice'?{ai_correct:correct}:null,quality:context.quality};
 }
 export const __test={mainSchedule,makeTask};

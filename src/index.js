@@ -74,10 +74,11 @@ async function cycleStats(env,projectId,cycle){
   return {...(fallback[0]?.results?.[0]||{}),...(fallback[1]?.results?.[0]||{})};
 }
 async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={}){
-  const protocol=humanProtocol||'main_v2',mainN=Number(settings.main_n||30),attentionN=Number(settings.attention_n||3);
+  const protocol=humanProtocol||'main_v2',c=Number(cycle||1),mainN=Number(settings.main_n||30),attentionN=Number(settings.attention_n||3);
+  // Avoid json_extract(context_json) scans. reviewer_trials is the normalized source of protocol/cycle/phase.
   return one(env.DB,`SELECT COALESCE(p.reviewer_obs_count,0) observations,
-    (SELECT COUNT(DISTINCT NULLIF(participant_hash,'anonymous')) FROM reviewer_observations WHERE project_id=p.id) participants,
-    (SELECT COUNT(DISTINCT CASE WHEN json_extract(context_json,'$.protocol')=? AND NULLIF(participant_hash,'anonymous') IS NOT NULL THEN participant_hash END) FROM reviewer_observations WHERE project_id=p.id) protocol_participants,
+    (SELECT COUNT(DISTINCT NULLIF(o.participant_hash,'anonymous')) FROM reviewer_observations o WHERE o.project_id=p.id) participants,
+    (SELECT COUNT(DISTINCT NULLIF(rt.participant_hash,'anonymous')) FROM reviewer_trials rt WHERE rt.project_id=p.id AND rt.protocol_version=? AND rt.research_cycle=? AND rt.status IN ('pending','done')) protocol_participants,
     (SELECT COUNT(*) FROM (
       SELECT rt.participant_hash FROM reviewer_trials rt
       WHERE rt.project_id=p.id AND rt.protocol_version=? AND rt.research_cycle=? AND NULLIF(rt.participant_hash,'anonymous') IS NOT NULL
@@ -86,7 +87,7 @@ async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={
          AND SUM(CASE WHEN rt.trial_phase='attention' AND rt.status='done' THEN 1 ELSE 0 END)>=?
          AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=p.id AND q.participant_hash=rt.participant_hash AND q.protocol_version=? AND q.research_cycle=? AND q.severity='EXCLUDE')
     )) publication_participants
-    FROM projects p WHERE p.id=?`,[protocol,protocol,Number(cycle||1),mainN,attentionN,protocol,Number(cycle||1),projectId]);
+    FROM projects p WHERE p.id=?`,[protocol,c,protocol,c,mainN,attentionN,protocol,c,projectId]);
 }
 
 async function storageIntegrity(env,pcols=null,knownProjectCount=null){
@@ -246,7 +247,7 @@ async function api(request,env,ctx=null){
       const b=await bodyJson(request),id=uid('review'),context={...(b.context||{}),protocol:LEGACY_PROTOCOL,protocol_version:LEGACY_PROTOCOL,legacy_import:true};
       await env.DB.batch([
         env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(context),nowIso()),
-        env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)`).bind(nowIso(),projectId,id)
+        env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,reviewer_last_observed_at=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)`).bind(nowIso(),nowIso(),projectId,id)
       ]);
       const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL_LEGACY',source:'admin_legacy_import',detail:{observation_id:id}});return json({id,protocol:LEGACY_PROTOCOL,revalidation:ev},201);
     }

@@ -15,12 +15,16 @@ function earlierStage(a,b){
   const ia=STAGES.indexOf(a),ib=STAGES.indexOf(b); if(ia<0)return b;if(ib<0)return a;return ia<=ib?a:b;
 }
 async function snapshot(env,p,reason,nextRevision,nextCycle){
-  const counts=await one(env.DB,`SELECT COUNT(*) candidates,
-    (SELECT COUNT(*) FROM simulation_runs WHERE project_id=?) runs,
-    (SELECT COUNT(*) FROM validations WHERE project_id=?) validations,
-    (SELECT COUNT(*) FROM approvals WHERE project_id=?) approvals,
-    (SELECT COUNT(*) FROM reports WHERE project_id=?) reports
-    FROM design_candidates WHERE project_id=? AND research_cycle=?`,[p.id,p.id,p.id,p.id,p.id,p.research_cycle]);
+  // Snapshot is audit metadata, not an analytical aggregate. Reuse materialized cycle counters
+  // instead of rescanning the two largest tables whenever evidence changes.
+  const counts=await one(env.DB,`SELECT
+    COALESCE(s.candidate_total,p.candidate_count,0) candidates,
+    COALESCE(s.simulation_total,0) runs,
+    (SELECT COUNT(*) FROM validations v WHERE v.project_id=p.id AND (v.evidence_revision IS NULL OR v.evidence_revision<=p.evidence_revision)) validations,
+    (SELECT COUNT(*) FROM approvals a WHERE a.project_id=p.id) approvals,
+    (SELECT COUNT(*) FROM reports r WHERE r.project_id=p.id) reports
+    FROM projects p LEFT JOIN project_cycle_stats s ON s.project_id=p.id AND s.research_cycle=p.research_cycle
+    WHERE p.id=?`,[p.id]);
   const snap={project_status:p.status,current_stage:p.current_stage,research_cycle:Number(p.research_cycle||1),evidence_revision:Number(p.evidence_revision||0),counts};
   await run(env.DB,`INSERT INTO evidence_snapshots(id,project_id,research_cycle,evidence_revision,reason,snapshot_json,created_at) VALUES(?,?,?,?,?,?,?)`,[uid('snapshot'),p.id,Number(p.research_cycle||1),nextRevision,reason,JSON.stringify(snap),nowIso()]);
 }
@@ -54,21 +58,24 @@ export async function registerEvidence(env,projectId,{kind,impact_from=null,sour
 }
 
 export async function approvalGates(env,projectId){
-  const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]);if(!p)return null;
-  const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
-  const protocol=await one(env.DB,`SELECT id,protocol_hash FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1`,[projectId,cycle]);
-  const compute=await one(env.DB,`SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' LIMIT 1`,[projectId,cycle]);
-  const robust=await one(env.DB,`SELECT 1 x FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=? AND v.validation_type='robust' AND v.status='CONFIRM' LIMIT 1`,[projectId,cycle]);
-  const reviewer=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,cycle,rev]);
-  const recompute=await one(env.DB,`SELECT 1 x FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=? AND v.evidence_revision=? AND v.validation_type='human_recompute' AND v.status='CONFIRM' LIMIT 1`,[projectId,cycle,rev]);
-  const signoff=await one(env.DB,`SELECT 1 x FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND decision='SCIENTIFICALLY_APPROVED' AND stale_at IS NULL LIMIT 1`,[projectId,cycle,rev]);
+  // One indexed statement replaces the former 7 D1 round-trips. EXISTS stops at the first hit.
+  const g=await one(env.DB,`SELECT p.research_cycle,p.evidence_revision,p.approval_stale,p.revalidation_from,
+    EXISTS(SELECT 1 FROM research_protocols rp WHERE rp.project_id=p.id AND rp.research_cycle=p.research_cycle LIMIT 1) protocol_ok,
+    EXISTS(SELECT 1 FROM design_candidates c WHERE c.project_id=p.id AND c.research_cycle=p.research_cycle AND c.status='confirmed_feasible' LIMIT 1) compute_ok,
+    EXISTS(SELECT 1 FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=p.id AND c.research_cycle=p.research_cycle AND v.validation_type='robust' AND v.status='CONFIRM' LIMIT 1) robust_ok,
+    EXISTS(SELECT 1 FROM reviewer_models rm WHERE rm.project_id=p.id AND rm.research_cycle=p.research_cycle AND rm.evidence_revision=p.evidence_revision LIMIT 1) reviewer_ok,
+    EXISTS(SELECT 1 FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=p.id AND c.research_cycle=p.research_cycle AND v.evidence_revision=p.evidence_revision AND v.validation_type='human_recompute' AND v.status='CONFIRM' LIMIT 1) recompute_ok,
+    EXISTS(SELECT 1 FROM approvals a WHERE a.project_id=p.id AND a.research_cycle=p.research_cycle AND a.evidence_revision=p.evidence_revision AND a.decision='SCIENTIFICALLY_APPROVED' AND a.stale_at IS NULL LIMIT 1) signoff_ok
+    FROM projects p WHERE p.id=?`,[projectId]);
+  if(!g)return null;
+  const cycle=Number(g.research_cycle||1),rev=Number(g.evidence_revision||0);
   const gates=[
-    {id:'G1',name:'Protocol Frozen',status:protocol?'PASS':'WAIT'},
-    {id:'G2',name:'Compute Confirmed',status:compute?'PASS':'WAIT'},
-    {id:'G3',name:'Robust Validation',status:robust?'PASS':'WAIT'},
-    {id:'G4',name:'Human Validation',status:reviewer?'PASS':'WAIT'},
-    {id:'G5',name:'Recompute Confirmed',status:recompute?'PASS':'WAIT'},
-    {id:'G6',name:'Scientific Sign-off',status:signoff?'PASS':'WAIT'}
+    {id:'G1',name:'Protocol Frozen',status:Number(g.protocol_ok)?'PASS':'WAIT'},
+    {id:'G2',name:'Compute Confirmed',status:Number(g.compute_ok)?'PASS':'WAIT'},
+    {id:'G3',name:'Robust Validation',status:Number(g.robust_ok)?'PASS':'WAIT'},
+    {id:'G4',name:'Human Validation',status:Number(g.reviewer_ok)?'PASS':'WAIT'},
+    {id:'G5',name:'Recompute Confirmed',status:Number(g.recompute_ok)?'PASS':'WAIT'},
+    {id:'G6',name:'Scientific Sign-off',status:Number(g.signoff_ok)?'PASS':'WAIT'}
   ];
-  return{research_cycle:cycle,evidence_revision:rev,stale:!!p.approval_stale,revalidation_from:p.revalidation_from,gates,passed:gates.filter(g=>g.status==='PASS').length,total:gates.length};
+  return{research_cycle:cycle,evidence_revision:rev,stale:!!g.approval_stale,revalidation_from:g.revalidation_from,gates,passed:gates.filter(x=>x.status==='PASS').length,total:gates.length};
 }

@@ -506,3 +506,6 @@
 - Official connector collection is no longer blocked by pending candidate computation.
 - Enabling official connectors immediately queues collection.
 - Added regression coverage for connector collection scheduling.
+
+## v0.10.5
+- D1 free-tier read optimization: indexed source due timestamps, persisted official connector coverage, event-driven scheduler fast path, 30-minute recovery cron, materialized candidate progress counts, and hot-query indexes.

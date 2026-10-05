@@ -22,7 +22,8 @@ function normalizeRows(source, body, contentType){
 }
 
 export async function collectProject(env, projectId,{dueOnly=false}={}){
-  const sources=await all(env.DB, `SELECT * FROM data_sources WHERE project_id=? AND enabled=1 ${dueOnly?"AND (last_fetched_at IS NULL OR datetime(last_fetched_at, '+' || cadence_minutes || ' minutes') <= datetime('now'))":''} ORDER BY last_fetched_at,id LIMIT ${env.EXTERNAL_RUNTIME==='github-actions'?1:2}`, [projectId]);
+  const dueSql=dueOnly?"AND COALESCE(next_fetch_at,'1970-01-01T00:00:00.000Z')<=?":'';
+  const sources=await all(env.DB, `SELECT * FROM data_sources WHERE project_id=? AND enabled=1 ${dueSql} ORDER BY COALESCE(next_fetch_at,'1970-01-01T00:00:00.000Z'),id LIMIT ${env.EXTERNAL_RUNTIME==='github-actions'?1:2}`, dueOnly?[projectId,nowIso()]:[projectId]);
   let inserted=0, empiricalRows=0, errors=[];
   for(const s of sources){
     try{
@@ -33,7 +34,7 @@ export async function collectProject(env, projectId,{dueOnly=false}={}){
         const fr=await collectFdicSource(env,projectId,s);
         inserted+=Number(fr.inserted||0);
         if(fr.errors?.length) errors.push(...fr.errors.map(x=>({source:s.name,...x})));
-        await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=? WHERE id=?`,[fr.partial?null:nowIso(),fr.partial?'partial:resume_next_tick':fr.errors?.length?`partial:${fr.errors.length}`:'ok',s.id]);
+        {const ts=nowIso();await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=?,next_fetch_at=CASE WHEN ? THEN ? ELSE strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || cadence_minutes || ' minutes')) END WHERE id=?`,[fr.partial?null:ts,fr.partial?'partial:resume_next_tick':fr.errors?.length?`partial:${fr.errors.length}`:'ok',fr.partial?1:0,ts,ts,s.id]);}
         continue;
       }
       const headers=safeJson(s.headers_json,{});
@@ -67,10 +68,10 @@ export async function collectProject(env, projectId,{dueOnly=false}={}){
             SELECT json_extract(value,'$.id'),?,?,json_extract(value,'$.observed_at'),json_extract(value,'$.ingested_at'),json_extract(value,'$.key'),json_extract(value,'$.value_num'),json_extract(value,'$.value_text'),json_extract(value,'$.payload_json'),json_extract(value,'$.quality_json'),json_extract(value,'$.content_hash') FROM json_each(?)`,[projectId,s.id,JSON.stringify(observations.slice(i,i+25))]);inserted+=Number(result.meta?.changes||0);}
         }
       }
-      await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status='ok' WHERE id=?`,[nowIso(),s.id]);
+      {const ts=nowIso();await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status='ok',next_fetch_at=strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || cadence_minutes || ' minutes')) WHERE id=?`,[ts,ts,s.id]);}
     }catch(e){
       errors.push({source:s.name,error:String(e)});
-      await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=? WHERE id=?`,[nowIso(),`error:${String(e).slice(0,120)}`,s.id]);
+      {const ts=nowIso();await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=?,next_fetch_at=strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || cadence_minutes || ' minutes')) WHERE id=?`,[ts,`error:${String(e).slice(0,120)}`,ts,s.id]);}
     }
   }
   await audit(env,projectId,'agent','collect.complete','project',projectId,{inserted,empiricalRows,errors});

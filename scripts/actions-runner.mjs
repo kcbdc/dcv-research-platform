@@ -11,7 +11,11 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
  try{
   // Set-level scheduling; one claimed job at a time. The same immutable protocol/seed engine runs here.
   await heartbeatRunner(env,token);
-  const initial=await scheduleAll(env,{process:false});
+  // Event-driven wakeups usually arrive with durable work already queued. In that case skip the
+  // scheduler-wide project/source probes and start consuming immediately; the fallback cron will
+  // still run scheduleAll when the queue is empty.
+  const due=await env.DB.prepare(`SELECT 1 x FROM jobs WHERE status='queued' AND run_after<=? LIMIT 1`).bind(new Date().toISOString()).first();
+  const initial=due?[]:await scheduleAll(env,{process:false});
   const first=Array.isArray(initial)?initial:[];
   completed+=first.length;failures+=first.filter(r=>!r.ok).length;
   while(Date.now()-started<seconds*1000&&completed<maxJobs&&(typeof env.DB.remaining==='number'?env.DB.remaining>=60:env.DB.calls<maxCalls-80)){
@@ -25,8 +29,8 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
   if(typeof env.DB.remaining!=='number'||env.DB.remaining>0){
    const result=await env.DB.batch([
     env.DB.prepare(`SELECT j.type,j.phase,j.status,COUNT(*) n FROM jobs j WHERE j.status IN ('queued','running','failed') GROUP BY j.type,j.phase,j.status`),
-    env.DB.prepare(`SELECT c.status,COUNT(*) n FROM design_candidates c JOIN projects p ON p.id=c.project_id WHERE c.research_cycle=p.research_cycle GROUP BY c.status`)
-   ]);progress={jobs:result[0].results||[],candidates:result[1].results||[]};
+    env.DB.prepare(`SELECT SUM(cs.candidate_pending) pending,SUM(cs.candidate_feasible) confirmed_feasible,SUM(cs.candidate_infeasible) infeasible,SUM(MAX(cs.candidate_total-cs.candidate_pending-cs.candidate_feasible-cs.candidate_infeasible,0)) other FROM project_cycle_stats cs JOIN projects p ON p.id=cs.project_id AND p.research_cycle=cs.research_cycle`)
+   ]);const c=result[1].results?.[0]||{};const candidates=[['pending',c.pending],['confirmed_feasible',c.confirmed_feasible],['infeasible',c.infeasible],['other',c.other]].filter(([,n])=>Number(n||0)>0).map(([status,n])=>({status,n:Number(n)}));progress={jobs:result[0].results||[],candidates};
   }
   const pending=progress?.jobs.some(j=>j.status==='queued'||j.status==='running');
   return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':pending?'work_remaining':'completed',jobs:completed,failures,progress,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0),elapsed_seconds:Math.round((Date.now()-started)/1000)};

@@ -8,10 +8,10 @@ const app=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const index=fs.readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
 const orch=fs.readFileSync(new URL('../src/lib/orchestrator.js',import.meta.url),'utf8');
 
-test('event-driven hybrid uses a 15-minute cron fallback to reduce D1 free-tier reads',()=>{
+test('event-driven hybrid uses a 30-minute cron fallback to reduce D1 free-tier reads',()=>{
   assert.deepEqual(wrangler.triggers.crons,['* * * * *']);
   assert.equal(wrangler.vars.MAX_JOBS_PER_TICK,'3');
-  assert.match(workflow,/cron:\s*'\*\/15 \* \* \* \*'/);
+  assert.match(workflow,/cron:\s*'\*\/30 \* \* \* \*'/);
 });
 
 test('Worker scheduled event drains a short fast-path chain',()=>{

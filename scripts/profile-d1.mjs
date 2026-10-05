@@ -115,15 +115,15 @@ const stageNow = () => db.prepare(`SELECT current_stage s, status FROM projects 
 const hasReport = () => db.prepare(`SELECT COUNT(*) n FROM reports WHERE project_id=?`).get(pid).n > 0;
 
 // Phase A: 파이프라인 가동(최대 12틱 = 3시간 상당, 메시지당 6초 가속). 완료(보고서 생성) 시 종료. 인간 검토 대기면 끝까지 대기 상태로 남는다.
-const t0 = performance.now(); let ticks = 0; const T0 = Date.now(), TICK = 15 * 60_000;
+const t0 = performance.now(); let ticks = 0; const T0 = Date.now(), TICK = 30 * 60_000;
 await scheduleAll(env); await drain(T0 + TICK);
 while (!hasReport() && ticks < 12) { ticks++; jumpTo(T0 + ticks * TICK); await scheduleAll(env); await drain(T0 + (ticks + 1) * TICK); }
 const phaseA = snap(), stageA = stageNow(), secsA = ((performance.now() - t0) / 1000).toFixed(1);
 
 const topA = [...bySql.entries()].sort((a, b) => b[1].rows - a[1].rows).slice(0, 10);
-// Phase B: 같은 상태에서 24시간 정상 운영(Cron 96회) 동안의 읽기량 = 일일 한도에 직접 영향
+// Phase B: 같은 상태에서 24시간 정상 운영(Cron 48회) 동안의 읽기량 = 일일 한도에 직접 영향
 bySql.clear(); const b0 = snap();
-const TB = Date.now(); for (let i = 1; i <= 96; i++) { jumpTo(TB + i * TICK); await scheduleAll(env); await drain(TB + (i + 1) * TICK); }
+const TB = Date.now(); for (let i = 1; i <= 48; i++) { jumpTo(TB + i * TICK); await scheduleAll(env); await drain(TB + (i + 1) * TICK); }
 const phaseB = diff(b0, snap());
 const topB = [...bySql.entries()].sort((a, b) => b[1].rows - a[1].rows).slice(0, 8);
 

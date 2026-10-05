@@ -238,16 +238,17 @@ export async function scheduleAll(env,{process=true}={}){
       WHERE p.id=jobs.project_id AND cs.candidate_pending>0)`,[new Date().toISOString()]);
   // 완료된 프로젝트는 대상에서 제외(이전: 모든 auto_run 프로젝트에 15분마다 advance + 데이터소스 집계)
   // Two indexed EXISTS probes inside ONE bounded set query replace N per-project reads.
+  const dueNow=new Date().toISOString();
   const ps=await all(env.DB,`SELECT p.id,
     CASE WHEN COALESCE(cs.candidate_pending,0)>0 THEN 1 ELSE 0 END pending_compute,
-    EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND (s.last_fetched_at IS NULL OR datetime(s.last_fetched_at, '+' || s.cadence_minutes || ' minutes')<=datetime('now'))) due,
+    EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND COALESCE(s.next_fetch_at,'1970-01-01T00:00:00.000Z')<=?) due,
     EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='collect_project' AND j.status IN ('queued','running')) collecting
     FROM projects p LEFT JOIN project_cycle_stats cs ON cs.project_id=p.id AND cs.research_cycle=p.research_cycle
     WHERE p.auto_run=1 AND (p.status NOT IN ('complete','report_ready') OR COALESCE(cs.candidate_pending,0)>0)
     AND (NOT EXISTS(SELECT 1 FROM jobs a WHERE a.project_id=p.id AND a.type='advance_project' AND a.status IN ('queued','running'))
       OR (NOT EXISTS(SELECT 1 FROM jobs b WHERE b.project_id=p.id AND b.type='collect_project' AND b.status IN ('queued','running'))
-        AND EXISTS(SELECT 1 FROM data_sources d WHERE d.project_id=p.id AND d.enabled=1 AND (d.last_fetched_at IS NULL OR datetime(d.last_fetched_at, '+' || d.cadence_minutes || ' minutes')<=datetime('now')))))
-    ORDER BY p.updated_at,p.id LIMIT 4`);
+        AND EXISTS(SELECT 1 FROM data_sources d WHERE d.project_id=p.id AND d.enabled=1 AND COALESCE(d.next_fetch_at,'1970-01-01T00:00:00.000Z')<=?)))
+    ORDER BY p.updated_at,p.id LIMIT 4`,[dueNow,dueNow]);
   for(const p of ps){
     await enqueueOnce(env,p.id,'advance_project',{},p.pending_compute?90:99);
     if(p.due&&!p.collecting)await enqueueOnce(env,p.id,'collect_project',{refresh:true},25);

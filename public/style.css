@@ -1244,6 +1244,6 @@ html,body{overflow-x:clip!important}
   #reportModal .report-html{padding-left:16px!important;padding-right:16px!important}
 }
 
-/* v0.10.0 · human trial resume notice */
+/* v0.10.2 · human trial resume notice */
 .human-resume-note{margin:.75rem 0;padding:.7rem .85rem;border:1px solid rgba(13,110,253,.18);border-radius:12px;background:rgba(13,110,253,.055);color:#36566f;font-size:.92rem;line-height:1.45}
 .human-resume-note i{margin-right:.35rem}

@@ -478,3 +478,9 @@
 ## 0.9.4
 - Repaired legacy/partial `project_cycle_stats` schemas that lacked `candidate_active`.
 - Hardened compute dashboard responsive geometry and contained the feasible-region canvas.
+
+## v0.9.9 - Report modal mobile presentation
+- Reworked the research report modal header into a two-row mobile-safe layout so the title no longer stacks vertically.
+- Moved report actions into a bounded toolbar and made the modal full-screen on narrow devices.
+- Tightened manuscript typography, title sizing, blockquote spacing, table scrolling, and page margins for natural mobile reading.
+- Bumped public asset cache keys and application/package version to 0.9.9.

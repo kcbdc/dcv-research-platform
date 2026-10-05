@@ -20,6 +20,12 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+      - name: Reconcile legacy D1 migration ledger
+        run: node scripts/reconcile-d1-migrations.mjs
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
+          CF_D1_API_TOKEN: ${{ secrets.CF_D1_API_TOKEN }}
       - name: Apply pending D1 migrations
         run: npx --yes wrangler@4.41.0 d1 migrations apply DB --remote
         env:

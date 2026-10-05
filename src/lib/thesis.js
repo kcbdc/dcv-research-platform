@@ -259,14 +259,19 @@ export async function buildThesisData(env, projectId) {
       AND (SELECT COUNT(*) FROM reviewer_trials rt WHERE rt.project_id=o.project_id AND rt.participant_hash=o.participant_hash AND rt.protocol_version=? AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.status='done')>=30
       AND (SELECT COUNT(*) FROM reviewer_trials ra WHERE ra.project_id=o.project_id AND ra.participant_hash=o.participant_hash AND ra.protocol_version=? AND ra.research_cycle=? AND ra.trial_phase='attention' AND ra.status='done')>=3
       THEN 1 ELSE 0 END eligible,
-    ROUND(ai_confidence,2) confidence, participant_hash ph, CASE WHEN json_extract(context_json,'$.protocol') IS NULL OR json_extract(context_json,'$.protocol')='legacy_v1' THEN 1 ELSE 0 END legacy_untagged, COUNT(*) n, SUM(response_ms) rt,
+    ROUND(ai_confidence,2) confidence, participant_hash ph, CASE WHEN json_extract(context_json,'$.protocol')=? THEN 1 ELSE 0 END protocol_current, CASE WHEN json_extract(context_json,'$.protocol') IS NULL OR json_extract(context_json,'$.protocol')='legacy_v1' THEN 1 ELSE 0 END legacy_untagged, COUNT(*) n, SUM(response_ms) rt,
     SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n, SUM(CASE WHEN ai_correct=1 AND human_accept=1 THEN 1 ELSE 0 END) acc_c,
     SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n, SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w,
     SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override,
     SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate
-    FROM reviewer_observations o WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, legacy_untagged`, [humanProtocol||'main_v2',humanProtocol||'main_v2',cycle,rev,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,projectId]);
+    FROM reviewer_observations o WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, protocol_current, legacy_untagged`, [humanProtocol||'main_v2',humanProtocol||'main_v2',cycle,rev,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',projectId]);
   const rvRows=humanGroups.filter(r=>Number(r.eligible)===1);
   const cumulativeParticipants=new Set(humanGroups.map(r=>r.ph).filter(p=>p && p!=='anonymous'));
+  // Current-protocol participant count is intentionally broader than the publication-analysis
+  // participant count. A participant enters this count after producing at least one eligible
+  // main_v2 observation for the current human protocol. Promotion into rv.participants still
+  // requires the preregistered completion/QC gates (30 main + 3 attention, no EXCLUDE flag).
+  const protocolParticipants=new Set(humanGroups.filter(r=>Number(r.protocol_current)===1 && r.ph && r.ph!=='anonymous').map(r=>r.ph));
   const cumulativeTrials=humanGroups.reduce((n,r)=>n+Number(r.n||0),0),legacyUntaggedTrials=humanGroups.filter(r=>Number(r.legacy_untagged)===1).reduce((n,r)=>n+Number(r.n||0),0);
   const rvT = { n: 0, rt: 0, appropriate: 0, wrong_n: 0, wrong_accept: 0, right_n: 0, right_override: 0 }, rvParticipants = new Set(), confMap = new Map();
   for (const g of rvRows) {
@@ -281,7 +286,7 @@ export async function buildThesisData(env, projectId) {
   const N = k => Number(rvTot?.[k] || 0);
   const byConfidence = confRows.map(e => ({ confidence: Number(e.confidence), n: e.n, correct_n: Number(e.correct_n), wrong_n: Number(e.wrong_n), accept_when_correct: ci(Number(e.acc_c), Number(e.correct_n)), accept_when_wrong: ci(Number(e.acc_w), Number(e.wrong_n)), mean_rt_ms: r4(e.mean_rt) }));
   const reviewer = {
-    n: N('n'), participants: N('participants'), cumulative_participants:cumulativeParticipants.size, cumulative_trials:cumulativeTrials, excluded_trials:cumulativeTrials-N('n'), legacy_untagged_trials:legacyUntaggedTrials, exclusion_note:'main_v2 본 실험 중 사전등록 품질기준을 통과한 trial만 주 분석에 사용합니다. legacy_v1·연습·주의확인·과속/지연 trial은 원자료로 보존하되 주 분석에서 제외합니다.',
+    n: N('n'), participants: N('participants'), protocol_participants:protocolParticipants.size, cumulative_participants:cumulativeParticipants.size, cumulative_trials:cumulativeTrials, excluded_trials:cumulativeTrials-N('n'), legacy_untagged_trials:legacyUntaggedTrials, exclusion_note:'현재 규약 대상 참가자 수와 주분석 적격 완료 참가자 수를 구분합니다. main_v2 본 실험 중 사전등록 품질기준을 모두 통과한 참가자/trial만 주 분석에 사용하며, 진행 중 참가자·legacy_v1·연습·주의확인·과속/지연 trial은 원자료로 보존하되 주 분석에서 제외합니다.',
     arr: ci(N('appropriate'), N('n')), false_accept: ci(N('wrong_accept'), N('wrong_n')), correct_override: ci(N('wrong_n') - N('wrong_accept'), N('wrong_n')), unnecessary_override: ci(N('right_override'), N('right_n')),
     mean_rt_ms: r4(rvTot?.mean_rt), by_confidence: byConfidence, model: safeJson(rmodel?.model_json, null), model_version: rmodel?.version ?? null, model_current:!!rmodel&&Number(rmodel.research_cycle||0)===cycle&&Number(rmodel.evidence_revision||-1)===rev, model_evidence_revision:rmodel?.evidence_revision??null, cluster_bootstrap: safeJson(rmodel?.model_json, null)?.cluster_bootstrap || clusterBootstrapGrouped(rvRows),protocol:humanProtocol||'legacy',participant_distribution:[...rvRows.reduce((m,r)=>m.set(r.ph,(m.get(r.ph)||0)+Number(r.n)),new Map()).values()]
   };

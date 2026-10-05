@@ -250,7 +250,7 @@ export async function scheduleAll(env,{process=true}={}){
     ORDER BY p.updated_at,p.id LIMIT 4`);
   for(const p of ps){
     await enqueueOnce(env,p.id,'advance_project',{},p.pending_compute?90:99);
-    if(p.due&&!p.collecting&&!p.pending_compute)await enqueueOnce(env,p.id,'collect_project',{refresh:true},25);
+    if(p.due&&!p.collecting)await enqueueOnce(env,p.id,'collect_project',{refresh:true},25);
   }
   // Progress reports are available before human/sign-off gates pass; coalesce pending work.
   const missingReports=await all(env.DB,`SELECT p.id FROM projects p

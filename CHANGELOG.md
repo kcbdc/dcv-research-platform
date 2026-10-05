@@ -1,3 +1,7 @@
+## v0.10.2
+- Reconcile legacy D1 migration ledger before applying pending migrations; prevents duplicate-column reruns such as `design_candidates.estimator`.
+- Fail closed on partially-applied non-idempotent ALTER migrations.
+
 
 ## v0.9.8
 - Mobile content containment for empirical/FDIC/official validation panels.

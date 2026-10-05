@@ -281,3 +281,7 @@ fetch('/api/runner/status',{cache:'no-store'}).then(r=>r.json()).then(console.lo
 
 ## v0.9.4 deployment note
 If D1 reports `project_cycle_stats has no column named candidate_active`, the database has a legacy/partial materialized-stats table. Apply remote migrations; migration 0028 rebuilds this derived table and backfills it from `design_candidates` / `simulation_runs`. No source research records are deleted.
+
+
+### v0.10.0
+인간 검토자 실험에서 미완료 pending trial을 자동 재개하고 내부 오류코드를 한국어 안내로 변환합니다.

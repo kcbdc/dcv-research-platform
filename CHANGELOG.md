@@ -484,3 +484,6 @@
 - Moved report actions into a bounded toolbar and made the modal full-screen on narrow devices.
 - Tightened manuscript typography, title sizing, blockquote spacing, table scrolling, and page margins for natural mobile reading.
 - Bumped public asset cache keys and application/package version to 0.9.9.
+
+## 0.10.0
+- Human trial pending-resume self-heal and Korean participant-facing error messages.

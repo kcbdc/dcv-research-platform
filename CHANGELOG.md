@@ -1,3 +1,8 @@
+
+## v0.9.8
+- Mobile content containment for empirical/FDIC/official validation panels.
+- Prevented long text, toolbars and evidence funnel from expanding beyond the viewport.
+- Responsive official connector forms and cache-bust update.
 # v0.9.7
 
 - Added dedicated BOK ECOS 102Y004/ABA1 monthly connector with latest END_TIME discovery.

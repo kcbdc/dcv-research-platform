@@ -487,3 +487,9 @@
 
 ## 0.10.0
 - Human trial pending-resume self-heal and Korean participant-facing error messages.
+
+## v0.10.1 — D1 preflight & stale-lock recovery
+- GitHub Actions now applies pending remote D1 migrations before compute.
+- D1 preflight now verifies `project_cycle_stats` before any job is claimed.
+- Missing materialized stats are reported as `MIGRATION_0027_MISSING` rather than a misleading preflight success.
+- Stale job lock recovery is stored as a stable code and rendered to users as a Korean recovery notice.

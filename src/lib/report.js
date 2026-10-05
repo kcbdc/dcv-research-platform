@@ -15,6 +15,21 @@ const arr = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x : JSON.
 const EST = { ema: 'EMA', kalman: 'Kalman', changepoint: 'Change-point', adaptive: 'Adaptive' };
 const estName = e => EST[e] || e;
 
+export function patchLiveHumanChecklist(markdown,live={}){
+  const md=String(markdown||'');
+  const protocolN=Number(live.protocol_participants??live.eligible_participants??0);
+  const publicationN=Number(live.publication_participants??0);
+  const cumulativeN=Number(live.participants??live.cumulative_participants??0);
+  const minP=Number(live.min_participants||32);
+  const status=publicationN>=minP?'충족':'미달';
+  const line=`- 현재 인간실험 규약 대상 참가자는 ${protocolN}명이며, 이 중 사전등록 완료·품질기준을 모두 충족해 주분석에 포함 가능한 참가자는 ${publicationN}명입니다. 사전 기준 ${minP}명은 ${status}입니다${cumulativeN?`(누적 ${cumulativeN}명)`:''}. 반복 trial 수는 참가자 수를 대체하지 않습니다.`;
+  const participantBullet=/^- 현재 인간실험 규약[^\n]*$/m;
+  if(participantBullet.test(md))return md.replace(participantBullet,line);
+  const legacyBullet=/^- 현재 인간실험[^\n]*(?:사전 기준|미달|참가자)[^\n]*$/m;
+  if(legacyBullet.test(md))return md.replace(legacyBullet,line);
+  return md.replace(/(## 논문 사용 전 점검 사항\s*\n)/,`$1\n${line}\n`);
+}
+
 export function checklist(t) {
   const items = [], rv = t.reviewer, pn = t.empirical.panel, c = t.candidates, lc=t.empirical.loss_calibration, dr=t.doctoral_rigor, rep=t.independent_replication, ev=t.external_validity;
   const minP=Number(t.definition.content?.validation?.min_human_participants||30);

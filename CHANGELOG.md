@@ -1,3 +1,9 @@
+# v0.10.6
+- Fixed stale human participant counts in stored paper reports by overlaying the live preflight participant status.
+- Separates current-protocol participants from publication-ready completed/QC-passing participants.
+- Automatically queues a report refresh when the preregistered participant threshold is reached.
+- Keeps human EXCLUDE flags effective across evidence revisions within the same protocol/cycle.
+
 ## 0.10.4
 - Fixed human participant count wording/aggregation mismatch between live report banner and paper preflight checklist.
 - Added `reviewer.protocol_participants` distinct from publication-eligible `reviewer.participants`.

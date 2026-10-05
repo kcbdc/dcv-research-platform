@@ -255,7 +255,7 @@ export async function buildThesisData(env, projectId) {
   // (신뢰도 구간 × 참가자)로 묶어 가져오면 행 수는 구간수×참가자수로 줄고, 합계·참가자 수·구간별 값을 모두 여기서 만든다.
   const humanProtocol=content.validation?.human_protocol||null;
   const humanGroups = await all(env.DB, `SELECT CASE WHEN json_extract(o.context_json,'$.protocol')=? AND json_extract(o.context_json,'$.trial_phase')='main' AND COALESCE(CAST(json_extract(o.context_json,'$.attention_check') AS INTEGER),0)=0 AND COALESCE(CAST(json_extract(o.context_json,'$.quality.trial_eligible') AS INTEGER),0)=1
-      AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=o.project_id AND q.participant_hash=o.participant_hash AND q.protocol_version=? AND q.research_cycle=? AND q.evidence_revision=? AND q.severity='EXCLUDE')
+      AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=o.project_id AND q.participant_hash=o.participant_hash AND q.protocol_version=? AND q.research_cycle=? AND q.severity='EXCLUDE')
       AND (SELECT COUNT(*) FROM reviewer_trials rt WHERE rt.project_id=o.project_id AND rt.participant_hash=o.participant_hash AND rt.protocol_version=? AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.status='done')>=30
       AND (SELECT COUNT(*) FROM reviewer_trials ra WHERE ra.project_id=o.project_id AND ra.participant_hash=o.participant_hash AND ra.protocol_version=? AND ra.research_cycle=? AND ra.trial_phase='attention' AND ra.status='done')>=3
       THEN 1 ELSE 0 END eligible,
@@ -264,7 +264,7 @@ export async function buildThesisData(env, projectId) {
     SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n, SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w,
     SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override,
     SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate
-    FROM reviewer_observations o WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, protocol_current, legacy_untagged`, [humanProtocol||'main_v2',humanProtocol||'main_v2',cycle,rev,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',projectId]);
+    FROM reviewer_observations o WHERE project_id=? GROUP BY eligible, ROUND(ai_confidence,2), participant_hash, protocol_current, legacy_untagged`, [humanProtocol||'main_v2',humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',cycle,humanProtocol||'main_v2',projectId]);
   const rvRows=humanGroups.filter(r=>Number(r.eligible)===1);
   const cumulativeParticipants=new Set(humanGroups.map(r=>r.ph).filter(p=>p && p!=='anonymous'));
   // Current-protocol participant count is intentionally broader than the publication-analysis

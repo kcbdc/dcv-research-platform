@@ -1,4 +1,4 @@
-## v0.10.2
+## v0.10.3
 - Reconcile legacy D1 migration ledger before applying pending migrations; prevents duplicate-column reruns such as `design_candidates.estimator`.
 - Fail closed on partially-applied non-idempotent ALTER migrations.
 
@@ -497,3 +497,8 @@
 - D1 preflight now verifies `project_cycle_stats` before any job is claimed.
 - Missing materialized stats are reported as `MIGRATION_0027_MISSING` rather than a misleading preflight success.
 - Stale job lock recovery is stored as a stable code and rendered to users as a Korean recovery notice.
+
+## 0.10.3
+- Official connector collection is no longer blocked by pending candidate computation.
+- Enabling official connectors immediately queues collection.
+- Added regression coverage for connector collection scheduling.

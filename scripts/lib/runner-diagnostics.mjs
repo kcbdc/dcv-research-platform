@@ -23,10 +23,10 @@ export function safeDiagnostic(error){
 export async function preflightD1(DB){
  const connection=await DB.prepare('SELECT 1 AS connected').first();
  if(connection?.connected!==1)throw new RunnerError('D1_PREFLIGHT_FAILED','D1 connection probe returned an unexpected response.');
- const required=['projects','jobs','simulation_runs','research_protocols','external_runner_leases'];
- const r=await DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('projects','jobs','simulation_runs','research_protocols','external_runner_leases')`).all();
+ const required=['projects','jobs','simulation_runs','research_protocols','external_runner_leases','project_cycle_stats'];
+ const r=await DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('projects','jobs','simulation_runs','research_protocols','external_runner_leases','project_cycle_stats')`).all();
  const found=new Set((r.results||[]).map(x=>x.name)),missing=required.filter(x=>!found.has(x));
- if(missing.length)throw new RunnerError(missing.includes('external_runner_leases')?'MIGRATION_0021_MISSING':'D1_SCHEMA_MISSING','Run npm run db:migrate:remote against the platform DB before Actions.',{missing_tables:missing});
+ if(missing.length){const code=missing.includes('external_runner_leases')?'MIGRATION_0021_MISSING':missing.includes('project_cycle_stats')?'MIGRATION_0027_MISSING':'D1_SCHEMA_MISSING';throw new RunnerError(code,'Required D1 schema is missing. Apply pending remote migrations before research compute.',{missing_tables:missing,action:'npm run db:migrate:remote'});}
 }
 export function runnerCredentials(input,expectedId){
  const clean=name=>String(input[name]||'').trim();

@@ -17,6 +17,6 @@ test('v0.10.0 long status and funnel text cannot widen viewport',()=>{
 });
 
 test('v0.10.0 cache-busts responsive assets',()=>{
-  assert.match(html,/style\.css\?v=0\.10\.1/);
-  assert.match(html,/lab\.css\?v=0\.10\.1/);
+  assert.match(html,/style\.css\?v=0\.10\.2/);
+  assert.match(html,/lab\.css\?v=0\.10\.2/);
 });

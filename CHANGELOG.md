@@ -1,3 +1,7 @@
+## 0.10.4
+- Fixed human participant count wording/aggregation mismatch between live report banner and paper preflight checklist.
+- Added `reviewer.protocol_participants` distinct from publication-eligible `reviewer.participants`.
+
 ## v0.10.3
 - Reconcile legacy D1 migration ledger before applying pending migrations; prevents duplicate-column reruns such as `design_candidates.estimator`.
 - Fail closed on partially-applied non-idempotent ALTER migrations.

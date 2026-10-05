@@ -39,6 +39,19 @@ function makeTask(participant,phase,ordinal,settings={cue_noise_sd:.18}){
  const task={scope:isPractice?'practice_v3_noisy_cues':'main_v3_noisy_cues',risk_band:band,anomaly_indicator:anomaly,transaction_pattern:rng()>.5?'최근 변동성 확대':'최근 변동성 안정',evidence_note:'표시된 단서는 잡음이 포함된 불완전 정보입니다. 숨겨진 실제 위험상태나 정답 규칙은 제공되지 않습니다.',decision_prompt:'불완전한 단서와 AI 권고를 함께 보고 권고를 수용할지 인간이 개입할지 판단하세요.'};
  return {confidence:spec.confidence,ai_correct:correct?1:0,recommendation:recommendation?1:0,task,attention_check:0,expected_accept:null};
 }
+
+async function resumePendingTrial(env,projectId,participant,cycle,protocolHash,settings){
+ const rows=await all(env.DB,`SELECT id,confidence,recommendation,task_json,trial_phase,ordinal,attention_check,expected_accept,created_at FROM reviewer_trials WHERE project_id=? AND research_cycle=? AND participant_hash=? AND protocol_version=? AND status='pending' ORDER BY created_at DESC,id DESC`,[projectId,cycle,participant,HUMAN_PROTOCOL]);
+ if(!rows.length)return null;
+ const keep=rows[0];
+ if(rows.length>1){
+  const extras=rows.slice(1).map(x=>x.id);
+  for(const id of extras)await run(env.DB,`UPDATE reviewer_trials SET status='superseded' WHERE id=? AND status='pending'`,[id]);
+ }
+ const raw=safeJson(keep.task_json,{}),task={...raw};delete task.protocol_hash;
+ return {trial_id:keep.id,protocol:HUMAN_PROTOCOL,protocol_hash:protocolHash,phase:keep.trial_phase,confidence:Number(keep.confidence),recommendation:!!keep.recommendation,task,attention_check:!!keep.attention_check,trial_number:Number(keep.ordinal),practice_cap:settings.practice_n,cap:settings.main_n,attention_cap:settings.attention_n,feedback_after_response:keep.trial_phase==='practice',resumed_pending:true,pending_created_at:keep.created_at};
+}
+
 async function counts(env,projectId,participant,cycle){
  const xs=await all(env.DB,`SELECT trial_phase,status,COUNT(*) n FROM reviewer_trials WHERE project_id=? AND research_cycle=? AND participant_hash=? AND protocol_version=? GROUP BY trial_phase,status`,[projectId,cycle,participant,HUMAN_PROTOCOL]);
  const get=(p,s)=>Number(xs.find(x=>x.trial_phase===p&&x.status===s)?.n||0), total=p=>get(p,'done')+get(p,'pending');
@@ -108,9 +121,11 @@ export async function createHumanTrial(env,projectId,participant,sessionToken=nu
  const eligibility=await replicationParticipantAllowed(env,projectId,participant,Number(p.research_cycle||1));if(!eligibility.allowed)throw new Error(eligibility.reason||'replication_requires_fresh_participant');
  const sess=await one(env.DB,`SELECT quiz_passed,quiz_attempts FROM reviewer_sessions WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[projectId,participant,HUMAN_PROTOCOL,Number(p.research_cycle||1)]);if(!sess?.quiz_passed)throw new Error(Number(sess?.quiz_attempts||0)>=2?'understanding_quiz_failed_twice':'understanding_quiz_required');
  if(sessionToken!==null&&!(await verifyHumanSession(env,projectId,participant,sessionToken)))throw new Error('invalid_human_session');
- const {settings,hash}=await protocolState(env,projectId),c=await counts(env,projectId,participant,Number(p.research_cycle||1));
+ const cycle=Number(p.research_cycle||1),{settings,hash}=await protocolState(env,projectId);
+ const pending=await resumePendingTrial(env,projectId,participant,cycle,hash,settings);if(pending)return pending;
+ const c=await counts(env,projectId,participant,cycle);
  let phase,ordinal;
- if(c.practice_done<settings.practice_n){phase='practice';if(c.practice_total>=settings.practice_n)throw new Error('complete_pending_practice_trial');ordinal=c.practice_done+1;}
+ if(c.practice_done<settings.practice_n){phase='practice';ordinal=c.practice_done+1;}
  else {
   const done=c.main_done+c.attention_done,total=c.main_total+c.attention_total;if(done>=settings.main_n+settings.attention_n)throw new Error('participant_trial_cap_reached');if(total>done)throw new Error('complete_pending_trial');
   const slot=postPracticePlan(participant,settings)[done];phase=slot.phase;ordinal=phase==='main'?slot.mainOrdinal:slot.attentionOrdinal;

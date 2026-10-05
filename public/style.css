@@ -1091,3 +1091,74 @@ html,body,#dashboard,.dcv-shell{width:100%;max-width:100%;min-width:0}
 /* v0.9.6 · region placeholder safe wrapping */
 #regionCanvas{overflow:visible!important}
 @media(max-width:480px){#computeSection>.col-12:first-child>article #regionCanvas{padding-left:0!important;padding-right:0!important}}
+
+/* ======================================================================
+   v0.9.8 · mobile content containment / no-clipping recovery
+   Prevent wide detail cards, toolbars, long status text and the evidence
+   funnel from expanding the page beyond the viewport on mobile browsers.
+   ====================================================================== */
+html,body{overflow-x:clip!important}
+#dashboard,.dcv-shell,#detailPanel,#detailPanel>.row.g-3.mt-1,
+#empiricalSection,#dataSection,#dataSection>*{min-width:0!important;max-width:100%!important}
+#empiricalSection .subpanel,#dataSection .subpanel,#dataSection .fdic-box,
+#dataSection .official-box,#dataSection .ext-matrix-box,#dataSection .ext-funnel-box{
+  width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;
+}
+#empiricalStatus,#fdicStatus,#officialStatus,#officialConnectionTest,#externalFunnelMeta,
+.empirical-panel p,.fdic-box small,.official-box small,.ext-matrix-box small,.ext-funnel-box small{
+  max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-word!important;
+}
+#empiricalSection .d-flex,#dataSection .d-flex{min-width:0!important;max-width:100%!important}
+#empiricalSection .d-flex.justify-content-between,#dataSection .d-flex.justify-content-between{
+  flex-wrap:wrap!important;align-items:flex-start!important;
+}
+#empiricalSection .btn-ghost,#empiricalSection .btn-future,
+#dataSection .btn-ghost,#dataSection .btn-future{
+  max-width:100%!important;white-space:normal!important;word-break:keep-all!important;line-height:1.3!important;
+}
+#empiricalSection .report-view,#dataSection .report-view{
+  width:100%!important;max-width:100%!important;min-width:0!important;
+  white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;
+  overflow-x:hidden!important;
+}
+#dataSection .fdic-ranking,#dataSection .matrix-table-wrap{
+  width:100%!important;max-width:100%!important;min-width:0!important;overflow-x:auto!important;
+  -webkit-overflow-scrolling:touch;
+}
+#dataSection .ext-matrix-summary{
+  display:grid!important;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))!important;
+  width:100%!important;max-width:100%!important;min-width:0!important;
+}
+#dataSection .ext-matrix-chip{min-width:0!important;max-width:100%!important;overflow:hidden!important}
+#dataSection .ext-funnel{width:100%!important;max-width:100%!important;min-width:0!important;align-items:stretch!important}
+#dataSection .funnel-step{
+  box-sizing:border-box!important;max-width:100%!important;min-width:0!important;
+  grid-template-columns:minmax(0,1fr) auto auto!important;
+}
+#dataSection .funnel-step span{min-width:0!important;white-space:normal!important;overflow-wrap:anywhere!important}
+
+@media(max-width:1399.98px){
+  #detailPanel{padding-left:14px!important;padding-right:14px!important}
+  #detailPanel>.row.g-3.mt-1{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:14px!important;width:100%!important}
+  #detailPanel>.row.g-3.mt-1>*{grid-column:1!important;width:100%!important;max-width:100%!important;min-width:0!important}
+  #dataSection{width:100%!important;max-width:100%!important;min-width:0!important}
+  #dataSection .row{margin-left:0!important;margin-right:0!important;width:100%!important;max-width:100%!important}
+  #dataSection .row>[class*="col-"]{min-width:0!important;max-width:100%!important}
+  #dataSection .official-config .row>[class*="col-"]{flex:1 1 220px!important;width:auto!important}
+}
+
+@media(max-width:767.98px){
+  #detailPanel{padding:12px 10px!important}
+  #empiricalSection .subpanel,#dataSection .subpanel{padding:14px!important}
+  #empiricalSection .d-flex.gap-2,#dataSection .d-flex.gap-2{width:100%!important}
+  #empiricalSection .d-flex.gap-2>button,#dataSection .d-flex.gap-2>button{
+    flex:1 1 150px!important;min-width:0!important;width:auto!important;
+  }
+  #dataSection .official-config .row{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:8px!important}
+  #dataSection .official-config .row>[class*="col-"]{width:100%!important;max-width:100%!important;flex:none!important;padding-left:0!important;padding-right:0!important}
+  #dataSection .ext-matrix-box>.d-flex,#dataSection .ext-funnel-box>.d-flex{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:6px!important}
+  #externalMatrixBadge{justify-self:start!important}
+  #dataSection .funnel-step{width:100%!important;padding:8px 10px!important;min-height:42px!important}
+  #dataSection .funnel-step span{font-size:.72rem!important}
+  #dataSection .funnel-step b,#dataSection .funnel-step small{font-size:.68rem!important}
+}

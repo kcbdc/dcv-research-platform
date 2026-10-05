@@ -88,7 +88,7 @@ export async function recoverStaleJobs(env, minutes=8) {
   if (Date.now()-lastStaleSweep < 120000) return;   // 큐 메시지마다가 아니라 isolate 당 2분에 1회만 점검
   lastStaleSweep = Date.now();
   const cutoff = new Date(Date.now()-minutes*60000).toISOString();
-  await run(env.DB, `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END, locked_at=NULL, run_after=?, last_error='stale_lock_recovered: lease expired; termination cause unverified', updated_at=? WHERE status='running' AND locked_at IS NOT NULL AND locked_at<?`, [nowIso(), nowIso(), cutoff]);
+  await run(env.DB, `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END, locked_at=NULL, run_after=?, last_error='stale_lock_recovered', updated_at=? WHERE status='running' AND locked_at IS NOT NULL AND locked_at<?`, [nowIso(), nowIso(), cutoff]);
 }
 
 export async function enqueueMany(env, projectId, type, payloads=[], priority=100) {

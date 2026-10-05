@@ -1162,3 +1162,84 @@ html,body{overflow-x:clip!important}
   #dataSection .funnel-step span{font-size:.72rem!important}
   #dataSection .funnel-step b,#dataSection .funnel-step small{font-size:.68rem!important}
 }
+
+/* ======================================================================
+   v0.9.9 · report modal mobile-first presentation
+   Keep the report header horizontal and readable, move actions into a
+   compact toolbar, and give the rendered manuscript comfortable margins.
+   ====================================================================== */
+#reportModal .report-modal-content{overflow:hidden!important}
+#reportModal .report-modal-header{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) auto!important;
+  grid-template-areas:"heading close" "actions actions"!important;
+  gap:12px 16px!important;
+  align-items:start!important;
+  padding:18px 22px 14px!important;
+  background:#fff!important;
+}
+#reportModal .report-modal-heading{grid-area:heading;min-width:0!important}
+#reportModal .report-modal-heading .modal-title{
+  font-size:1.15rem!important;font-weight:800!important;line-height:1.25!important;
+  color:#132c49!important;letter-spacing:-.02em!important;white-space:normal!important;
+}
+#reportModal .report-modal-heading small{
+  display:block!important;margin-top:4px!important;color:#728297!important;
+  font-size:.72rem!important;line-height:1.45!important;white-space:normal!important;
+}
+#reportModal .report-close{grid-area:close;margin:0!important;align-self:start!important}
+#reportModal .report-modal-actions{
+  grid-area:actions!important;margin:0!important;width:100%!important;min-width:0!important;
+  display:flex!important;flex-wrap:wrap!important;gap:8px!important;align-items:center!important;
+}
+#reportModal .report-modal-actions .report-status{
+  flex:1 1 220px!important;min-width:0!important;white-space:normal!important;line-height:1.35!important;
+}
+#reportModal .report-modal-actions button{
+  min-height:38px!important;white-space:nowrap!important;word-break:keep-all!important;
+}
+#reportModal .report-modal-body{padding:0!important;background:#eef3f8!important}
+#reportModal .report-html{
+  width:min(100%,900px)!important;margin:0 auto!important;padding:34px 42px 56px!important;
+  border-radius:0!important;box-shadow:0 8px 28px rgba(30,56,86,.08)!important;
+  min-height:100%!important;overflow-wrap:anywhere!important;word-break:normal!important;
+}
+#reportModal .report-html h1{
+  font-size:1.75rem!important;line-height:1.35!important;letter-spacing:-.035em!important;
+  word-break:keep-all!important;overflow-wrap:break-word!important;margin:1.1rem 0 1rem!important;
+}
+#reportModal .report-html h2{font-size:1.28rem!important;line-height:1.4!important;word-break:keep-all!important}
+#reportModal .report-html h3{font-size:1.05rem!important;line-height:1.45!important;word-break:keep-all!important}
+#reportModal .report-html p,#reportModal .report-html li,#reportModal .report-html blockquote{
+  font-size:.92rem!important;line-height:1.78!important;word-break:keep-all!important;overflow-wrap:break-word!important;
+}
+#reportModal .report-html blockquote{margin:1rem 0!important;padding:.75rem 1rem!important;border-radius:0 8px 8px 0!important}
+#reportModal .report-html table{max-width:100%!important;-webkit-overflow-scrolling:touch!important}
+#reportModal #reportText{max-height:none!important;margin:18px!important;min-width:0!important}
+
+@media(max-width:767.98px){
+  #reportModal .report-dialog{margin:0!important;width:100%!important;max-width:none!important;height:100%!important}
+  #reportModal .report-modal-content{height:100dvh!important;border-radius:0!important;border:0!important}
+  #reportModal .report-modal-header{padding:14px 16px 12px!important;gap:10px 12px!important}
+  #reportModal .report-modal-heading .modal-title{font-size:1.08rem!important}
+  #reportModal .report-modal-heading small{font-size:.68rem!important}
+  #reportModal .report-modal-actions{
+    display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:7px!important;
+  }
+  #reportModal .report-modal-actions .report-status{grid-column:1/-1!important;font-size:.66rem!important;min-height:18px!important}
+  #reportModal .report-modal-actions button{width:100%!important;padding:8px 9px!important;font-size:.69rem!important;min-width:0!important}
+  #reportModal .report-modal-actions #reportRegenBtn{grid-column:1/-1!important}
+  #reportModal .report-modal-body{padding:0!important;overflow-x:hidden!important}
+  #reportModal .report-html{padding:24px 20px 46px!important;box-shadow:none!important}
+  #reportModal .report-html h1{font-size:clamp(1.34rem,5.6vw,1.62rem)!important;line-height:1.38!important;margin:.8rem 0 1rem!important}
+  #reportModal .report-html h2{font-size:1.12rem!important}
+  #reportModal .report-html h3{font-size:.98rem!important}
+  #reportModal .report-html p,#reportModal .report-html li,#reportModal .report-html blockquote{font-size:.86rem!important;line-height:1.72!important}
+  #reportModal .report-html table{font-size:.72rem!important}
+  #reportModal #reportText{margin:12px!important;font-size:.72rem!important;line-height:1.55!important}
+}
+@media(max-width:389.98px){
+  #reportModal .report-modal-actions{grid-template-columns:1fr!important}
+  #reportModal .report-modal-actions .report-status,#reportModal .report-modal-actions #reportRegenBtn{grid-column:1!important}
+  #reportModal .report-html{padding-left:16px!important;padding-right:16px!important}
+}

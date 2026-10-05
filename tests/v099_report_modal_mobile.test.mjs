@@ -14,5 +14,5 @@ test("rendered report has mobile manuscript typography and full-screen safe area
   assert.match(css,/#reportModal \.report-html h1/);
   assert.match(css,/word-break:keep-all!important/);
   assert.match(css,/#reportModal \.report-modal-content\{height:100dvh!important/);
-  assert.match(html,/style\.css\?v=0\.10\.0/);
+  assert.match(html,/style\.css\?v=0\.10\.1/);
 });

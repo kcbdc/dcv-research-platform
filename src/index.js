@@ -73,21 +73,27 @@ async function cycleStats(env,projectId,cycle){
   ]);
   return {...(fallback[0]?.results?.[0]||{}),...(fallback[1]?.results?.[0]||{})};
 }
-async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={}){
-  const protocol=humanProtocol||'main_v2',c=Number(cycle||1),mainN=Number(settings.main_n||30),attentionN=Number(settings.attention_n||3);
-  // Avoid json_extract(context_json) scans. reviewer_trials is the normalized source of protocol/cycle/phase.
-  return one(env.DB,`SELECT COALESCE(p.reviewer_obs_count,0) observations,
-    (SELECT COUNT(DISTINCT NULLIF(o.participant_hash,'anonymous')) FROM reviewer_observations o WHERE o.project_id=p.id) participants,
-    (SELECT COUNT(DISTINCT NULLIF(rt.participant_hash,'anonymous')) FROM reviewer_trials rt WHERE rt.project_id=p.id AND rt.protocol_version=? AND rt.research_cycle=? AND rt.status IN ('pending','done')) protocol_participants,
-    (SELECT COUNT(*) FROM (
+async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={},opts={}){
+  const protocol=humanProtocol||'main_v2',c=Number(cycle||1),mainN=Number(settings.main_n||30),attentionN=Number(settings.attention_n||3),withPublication=opts.publication!==false;
+  // reviewer_trials is the normalized source for current-protocol/cycle counts; do not re-parse observation JSON on polling paths.
+  const publicationSql=withPublication?`(SELECT COUNT(*) FROM (
       SELECT rt.participant_hash FROM reviewer_trials rt
       WHERE rt.project_id=p.id AND rt.protocol_version=? AND rt.research_cycle=? AND NULLIF(rt.participant_hash,'anonymous') IS NOT NULL
       GROUP BY rt.participant_hash
       HAVING SUM(CASE WHEN rt.trial_phase='main' AND rt.status='done' THEN 1 ELSE 0 END)>=?
          AND SUM(CASE WHEN rt.trial_phase='attention' AND rt.status='done' THEN 1 ELSE 0 END)>=?
          AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=p.id AND q.participant_hash=rt.participant_hash AND q.protocol_version=? AND q.research_cycle=? AND q.severity='EXCLUDE')
-    )) publication_participants
-    FROM projects p WHERE p.id=?`,[protocol,c,protocol,c,mainN,attentionN,protocol,c,projectId]);
+    ))`:'NULL';
+  const binds=[protocol,c];
+  if(withPublication)binds.push(protocol,c,mainN,attentionN,protocol,c);
+  binds.push(projectId);
+  const row=await one(env.DB,`SELECT COALESCE(p.reviewer_obs_count,0) observations,
+    COALESCE(p.reviewer_participant_count,0) participants,
+    (SELECT COUNT(DISTINCT NULLIF(rt.participant_hash,'anonymous')) FROM reviewer_trials rt WHERE rt.project_id=p.id AND rt.protocol_version=? AND rt.research_cycle=? AND rt.status IN ('pending','done')) protocol_participants,
+    ${publicationSql} publication_participants
+    FROM projects p WHERE p.id=?`,binds);
+  if(row)row.eligible_participants=Number(row.protocol_participants||0);
+  return row;
 }
 
 async function storageIntegrity(env,pcols=null,knownProjectCount=null){
@@ -180,9 +186,13 @@ async function api(request,env,ctx=null){
       catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:400);}
     }
     if(parts.length===3 && method==='GET'){
-      const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]); if(!p)return json({error:'not_found'},404);
-      const def=await one(env.DB,`SELECT status,version,gate_json,content_json,ai_note,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
-      const meas=await one(env.DB,`SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);
+      const [pRes,defRes,measRes]=await env.DB.batch([
+        env.DB.prepare(`SELECT * FROM projects WHERE id=?`).bind(projectId),
+        env.DB.prepare(`SELECT status,version,gate_json,content_json,ai_note,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`).bind(projectId),
+        env.DB.prepare(`SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`).bind(projectId)
+      ]);
+      const p=pRes?.results?.[0]||null;if(!p)return json({error:'not_found'},404);
+      const def=defRes?.results?.[0]||null,meas=measRes?.results?.[0]||null;
       const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
       const counts=await cycleStats(env,projectId,cycle);
 
@@ -198,10 +208,14 @@ async function api(request,env,ctx=null){
         }
       }
       regretMeta.evidence_available=regretMeta.scenario_count>0;if(!regretMeta.evidence_available)counts.min_regret=null;
-      const app=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
-      const staleApproval=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND stale_at IS NOT NULL ORDER BY stale_at DESC LIMIT 1`,[projectId]);
-      const reviewer=await one(env.DB,`SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
-      const jobs=await all(env.DB,`SELECT type,status,attempts,last_error,created_at,updated_at FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 20`,[projectId]);
+      const [appRes,staleRes,reviewerRes,jobsRes,scenarioRes]=await env.DB.batch([
+        env.DB.prepare(`SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`).bind(projectId,cycle,rev),
+        env.DB.prepare(`SELECT * FROM approvals WHERE project_id=? AND stale_at IS NOT NULL ORDER BY stale_at DESC LIMIT 1`).bind(projectId),
+        env.DB.prepare(`SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`).bind(projectId,cycle,rev),
+        env.DB.prepare(`SELECT type,status,attempts,last_error,created_at,updated_at FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 20`).bind(projectId),
+        env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical,SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`).bind(projectId)
+      ]);
+      const app=appRes?.results?.[0]||null,staleApproval=staleRes?.results?.[0]||null,reviewer=reviewerRes?.results?.[0]||null,jobs=jobsRes?.results||[],scenarios=scenarioRes?.results?.[0]||null;
       // Self-heal only when the data already fetched for the UI proves a heavy job is stranded.
       // The previous version ran githubRunnerStatus() on every detail poll, multiplying D1 reads.
       if(ctx&&String(env.COMPUTE_EXECUTOR||'')==='hybrid'){
@@ -209,12 +223,10 @@ async function api(request,env,ctx=null){
         if(stranded)ctx.waitUntil(recoverHybridStall(env,{reason:'project_detail_stranded'}).catch(()=>null));
       }
       const runs={total:Number(counts?.simulation_total||0),exploration:Number(counts?.simulation_exploration||0),refinement:Number(counts?.simulation_refinement||0),confirmation:Number(counts?.simulation_confirmation||0),robust:Number(counts?.simulation_robust||0)};
-      const scenarios=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical,SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`,[projectId]);
-      const empirical=await empiricalReadiness(env,projectId);
-      const protocol=await latestProtocol(env,projectId);
-      const gates=await approvalGates(env,projectId);
       const humanProtocol=safeJson(def?.content_json,{}).validation?.human_protocol||null;
-      const human=await humanStats(env,projectId,cycle,humanProtocol);
+      const [empirical,protocol,gates,human]=await Promise.all([
+        empiricalReadiness(env,projectId),latestProtocol(env,projectId),approvalGates(env,projectId),humanStats(env,projectId,cycle,humanProtocol,{},{publication:false})
+      ]);
 
       return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:{...counts,regret_meta:regretMeta},approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.observations||0),human_participants:Number(human?.participants||0),human_eligible_participants:Number(human?.eligible_participants||0),empirical,protocol});
     }
@@ -246,8 +258,7 @@ async function api(request,env,ctx=null){
     if(parts[3]==='reviewer-observations-legacy' && method==='POST'){
       const b=await bodyJson(request),id=uid('review'),context={...(b.context||{}),protocol:LEGACY_PROTOCOL,protocol_version:LEGACY_PROTOCOL,legacy_import:true};
       await env.DB.batch([
-        env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(context),nowIso()),
-        env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,reviewer_last_observed_at=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)`).bind(nowIso(),nowIso(),projectId,id)
+        env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(context),nowIso())
       ]);
       const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL_LEGACY',source:'admin_legacy_import',detail:{observation_id:id}});return json({id,protocol:LEGACY_PROTOCOL,revalidation:ev},201);
     }
@@ -304,10 +315,18 @@ async function api(request,env,ctx=null){
     if(parts[3]==='protocol' && method==='GET'){ const p=await latestProtocol(env,projectId); return p?json(p):json({error:'protocol_not_frozen'},404); }
     if(parts[3]==='scientific-signoff' && method==='POST'){ const b=await bodyJson(request); return json(await scientificSignoff(env,projectId,{reviewer_name:b.reviewer_name||'PI',rationale:b.rationale||''})); }
     if(parts[3]==='report' && method==='GET'){
-      const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); let r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]); const stale=!r; if(!r)r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]); if(r&&!stale){ try{ r=await upgradeStoredReport(env,projectId,r); }catch(e){ /* 구버전 보고서는 그대로 반환 */ } }
-      const hp=await one(env.DB,`SELECT json_extract(content_json,'$.validation.human_protocol') human_protocol,COALESCE(json_extract(content_json,'$.validation.human_main_n'),30) human_main_n,COALESCE(json_extract(content_json,'$.validation.human_attention_n'),3) human_attention_n,COALESCE(json_extract(content_json,'$.validation.min_human_participants'),32) min_human_participants FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
-      const liveHuman=await humanStats(env,projectId,Number(p?.research_cycle||1),hp?.human_protocol||null,{main_n:hp?.human_main_n,attention_n:hp?.human_attention_n});
-      liveHuman.eligible_participants=Number(liveHuman?.protocol_participants||0); // backwards-compatible API alias
+      const [pRes,hpRes]=await env.DB.batch([
+        env.DB.prepare(`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`).bind(projectId),
+        env.DB.prepare(`SELECT json_extract(content_json,'$.validation.human_protocol') human_protocol,COALESCE(json_extract(content_json,'$.validation.human_main_n'),30) human_main_n,COALESCE(json_extract(content_json,'$.validation.human_attention_n'),3) human_attention_n,COALESCE(json_extract(content_json,'$.validation.min_human_participants'),32) min_human_participants FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`).bind(projectId)
+      ]);
+      const p=pRes?.results?.[0]||null,hp=hpRes?.results?.[0]||null;
+      const loadReport=async()=>{
+        let r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]);
+        const stale=!r;if(!r)r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
+        if(r&&!stale){try{r=await upgradeStoredReport(env,projectId,r);}catch(e){/* 구버전 보고서는 그대로 반환 */}}
+        return {r,stale};
+      };
+      const [{r,stale},liveHuman]=await Promise.all([loadReport(),humanStats(env,projectId,Number(p?.research_cycle||1),hp?.human_protocol||null,{main_n:hp?.human_main_n,attention_n:hp?.human_attention_n})]);
       const minHuman=Number(hp?.min_human_participants||32);
       if(stale && Number(liveHuman?.protocol_participants||0)>=minHuman) await enqueueOnce(env,projectId,'generate_report',{},105,1);
       const liveNotice=`> 현재 저장된 인간실험: 누적 참가자 ${Number(liveHuman?.participants||0)}명 / 관측 ${Number(liveHuman?.observations||0)}건, 현재 인간실험 규약 대상 ${Number(liveHuman?.protocol_participants||0)}명, 주분석 적격 완료 ${Number(liveHuman?.publication_participants||0)}명(사전 기준 ${minHuman}명).

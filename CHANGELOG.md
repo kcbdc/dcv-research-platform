@@ -1,3 +1,6 @@
+## v0.10.8
+- D1 query round-trip compaction and human-session read reduction.
+
 # v0.10.6
 - Fixed stale human participant counts in stored paper reports by overlaying the live preflight participant status.
 - Separates current-protocol participants from publication-ready completed/QC-passing participants.

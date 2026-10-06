@@ -60,9 +60,13 @@ const stmt = (sql, binds = []) => ({
   first: async () => { const r = db.prepare(sql).get(...binds) ?? null; account(sql, r ? 1 : 0, binds); return r; },
   all: async () => { const r = db.prepare(sql).all(...binds); account(sql, r.length, binds); return { results: r }; },
   run: async () => { const r = db.prepare(sql).run(...binds); account(sql, 0); return { meta: { changes: r.changes } }; },
-  _run: () => { const r = db.prepare(sql).run(...binds); account(sql, 0); return r; }
+  _run: () => { const r = db.prepare(sql).run(...binds); account(sql, 0); return r; },
+  _batch: () => {
+    if(/^\s*(select|pragma|with)\b/i.test(sql)){const r=db.prepare(sql).all(...binds);account(sql,r.length,binds);return {results:r};}
+    const r=db.prepare(sql).run(...binds);account(sql,0,binds);return {meta:{changes:r.changes}};
+  }
 });
-const DB = { prepare: s => stmt(s), batch: async l => { db.exec('BEGIN'); try { const o = l.map(s => s._run()); db.exec('COMMIT'); return o; } catch (e) { db.exec('ROLLBACK'); throw e; } } };
+const DB = { prepare: s => stmt(s), batch: async l => { db.exec('BEGIN'); try { const o = l.map(s => s._batch()); db.exec('COMMIT'); return o; } catch (e) { db.exec('ROLLBACK'); throw e; } } };
 const env = { DB, MAX_JOBS_PER_TICK: '1', SIM_BATCH_SIZE: '180', AUTO_APPROVE: 'true', AUTO_PIPELINE: 'true' };
 
 

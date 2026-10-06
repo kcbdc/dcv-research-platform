@@ -58,7 +58,7 @@ async function counts(env,projectId,participant,cycle){
  return {practice_done:get('practice','done'),practice_total:total('practice'),main_done:get('main','done'),main_total:total('main'),attention_done:get('attention','done'),attention_total:total('attention')};
 }
 async function issueSessionToken(env,projectId,participant,cycle){const token=`hs_${crypto.randomUUID()}_${crypto.randomUUID()}`,hash=await sha256Hex(token);await run(env.DB,`UPDATE reviewer_sessions SET session_token_hash=?,updated_at=? WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[hash,nowIso(),projectId,participant,HUMAN_PROTOCOL,cycle]);return token;}
-export async function verifyHumanSession(env,projectId,participant,token){if(!token)return false;const p=await one(env.DB,'SELECT research_cycle FROM projects WHERE id=?',[projectId]);if(!p)return false;const row=await one(env.DB,`SELECT session_token_hash,quiz_passed FROM reviewer_sessions WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[projectId,participant,HUMAN_PROTOCOL,Number(p.research_cycle||1)]);if(!row?.quiz_passed||!row.session_token_hash)return false;return secureEqual(String(row.session_token_hash),await sha256Hex(String(token)));}
+export async function verifyHumanSession(env,projectId,participant,token,knownCycle=null){if(!token)return false;let cycle=knownCycle;if(cycle==null){const p=await one(env.DB,'SELECT research_cycle FROM projects WHERE id=?',[projectId]);if(!p)return false;cycle=Number(p.research_cycle||1);}const row=await one(env.DB,`SELECT session_token_hash,quiz_passed FROM reviewer_sessions WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[projectId,participant,HUMAN_PROTOCOL,Number(cycle||1)]);if(!row?.quiz_passed||!row.session_token_hash)return false;return secureEqual(String(row.session_token_hash),await sha256Hex(String(token)));}
 
 
 export async function loginHumanInvite(env,inviteToken,requestFingerprint='',projectId=null){
@@ -120,7 +120,7 @@ export async function createHumanTrial(env,projectId,participant,sessionToken=nu
  const p=await one(env.DB,'SELECT research_cycle,evidence_revision FROM projects WHERE id=?',[projectId]);if(!p)throw new Error('project_not_found');
  const eligibility=await replicationParticipantAllowed(env,projectId,participant,Number(p.research_cycle||1));if(!eligibility.allowed)throw new Error(eligibility.reason||'replication_requires_fresh_participant');
  const sess=await one(env.DB,`SELECT quiz_passed,quiz_attempts FROM reviewer_sessions WHERE project_id=? AND participant_hash=? AND protocol_version=? AND research_cycle=?`,[projectId,participant,HUMAN_PROTOCOL,Number(p.research_cycle||1)]);if(!sess?.quiz_passed)throw new Error(Number(sess?.quiz_attempts||0)>=2?'understanding_quiz_failed_twice':'understanding_quiz_required');
- if(sessionToken!==null&&!(await verifyHumanSession(env,projectId,participant,sessionToken)))throw new Error('invalid_human_session');
+ if(sessionToken!==null&&!(await verifyHumanSession(env,projectId,participant,sessionToken,Number(p.research_cycle||1))))throw new Error('invalid_human_session');
  const cycle=Number(p.research_cycle||1),{settings,hash}=await protocolState(env,projectId);
  const pending=await resumePendingTrial(env,projectId,participant,cycle,hash,settings);if(pending)return pending;
  const c=await counts(env,projectId,participant,cycle);
@@ -139,7 +139,7 @@ async function upsertFlag(env,projectId,participant,t,code,severity,detail={}){a
 export async function recordHumanTrial(env,projectId,b,sessionToken=null){
  const t=await one(env.DB,'SELECT t.*,p.research_cycle current_cycle FROM reviewer_trials t JOIN projects p ON p.id=t.project_id WHERE t.id=? AND t.project_id=? AND t.participant_hash=?',[b.trial_id,projectId,b.participant_hash]);
  if(!t||t.status!=='pending'||Number(t.research_cycle)!==Number(t.current_cycle))throw new Error('Invalid, consumed or superseded trial');
- if(sessionToken!==null&&!(await verifyHumanSession(env,projectId,b.participant_hash,sessionToken)))throw new Error('invalid_human_session');
+ if(sessionToken!==null&&!(await verifyHumanSession(env,projectId,b.participant_hash,sessionToken,Number(t.current_cycle||t.research_cycle||1))))throw new Error('invalid_human_session');
  if(typeof b.human_accept!=='boolean')throw new Error('Invalid response');
  const {settings,hash}=await protocolState(env,projectId);if(t.protocol_hash&&String(t.protocol_hash)!==hash)throw new Error('human_protocol_drift');
  const completedAt=nowIso(),serverMs=Math.max(0,Date.parse(completedAt)-Date.parse(t.created_at)),clientMs=Number.isFinite(Number(b.response_ms))?Math.max(0,Number(b.response_ms)):null;
@@ -148,8 +148,7 @@ export async function recordHumanTrial(env,projectId,b,sessionToken=null){
  const context={protocol:HUMAN_PROTOCOL,protocol_version:HUMAN_PROTOCOL,protocol_hash:hash,task:safeJson(t.task_json),cycle:t.research_cycle,trial_phase:t.trial_phase,ordinal:t.ordinal,attention_check:!!t.attention_check,focus_blur_count:focusBlur,timing:{server_response_ms:serverMs,client_response_ms:clientMs,client_server_abs_diff_ms:clientMs==null?null:Math.abs(clientMs-serverMs)},quality:{too_fast:tooFast,too_slow:tooSlow,attention_fail:attentionFail,trial_eligible:analysisEligible}};
  const rs=await env.DB.batch([
   env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at,trial_id) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM reviewer_trials WHERE id=? AND status='pending')`).bind(id,projectId,b.participant_hash,t.confidence,t.ai_correct,b.human_accept?1:0,serverMs,recovered?1:0,recovered?serverMs:null,JSON.stringify(context),completedAt,t.id,t.id),
-  env.DB.prepare("UPDATE reviewer_trials SET status='done',completed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)").bind(completedAt,t.id,id),
-  env.DB.prepare('UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1,reviewer_last_observed_at=?,reviewer_hold_marker=NULL WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)').bind(completedAt,projectId,id)
+  env.DB.prepare("UPDATE reviewer_trials SET status='done',completed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM reviewer_observations WHERE id=?)").bind(completedAt,t.id,id)
  ]);
  if(!rs[0].meta?.changes)throw new Error('Trial already consumed');
  if(tooFast)await upsertFlag(env,projectId,b.participant_hash,t,'FAST_RESPONSE_TRIAL','WARN',{threshold_ms:settings.fast_ms});

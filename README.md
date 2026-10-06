@@ -288,3 +288,7 @@ If D1 reports `project_cycle_stats has no column named candidate_active`, the da
 
 ### v0.10.7 database/runtime note
 Apply `migrations/0031_query_hotpath_compaction.sql` before deploying v0.10.7. The release compacts D1 hot queries and tightens current-cycle human-evidence scoping without changing deterministic research results. See `PATCH_NOTES_v0.10.7.md` and `D1_PROFILE_v0.10.7.md`.
+
+
+### v0.10.8 database/runtime note
+Apply `migrations/0032_query_roundtrip_and_human_session.sql` before deploying v0.10.8. This release merges the safe parts of the supplied DB-query patch, materializes cumulative human-participant counts, and removes redundant per-trial project reads while preserving research-cycle isolation.

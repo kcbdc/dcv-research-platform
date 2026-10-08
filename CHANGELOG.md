@@ -1,3 +1,8 @@
+## v0.10.9
+- Rebuild `project_cycle_stats` from authoritative candidate/run tables to repair legacy counter drift.
+- Clamp all materialized candidate/run counters at zero in triggers.
+- Clamp dashboard cycle statistics defensively so UNEVALUATED can never render negative.
+
 ## v0.10.8
 - D1 query round-trip compaction and human-session read reduction.
 

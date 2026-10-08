@@ -64,7 +64,9 @@ async function cycleStats(env,projectId,cycle){
     const s=await one(env.DB,`SELECT candidate_total total,candidate_pending unevaluated,candidate_feasible feasible,candidate_infeasible infeasible,candidate_unresolved unresolved,boundary_sum,boundary_count,simulation_total,simulation_exploration,simulation_refinement,simulation_confirmation,simulation_robust,latest_simulation_at,regret_updated_at FROM project_cycle_stats WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
     if(s){
       const min=await one(env.DB,`SELECT max_regret,updated_at FROM design_candidates WHERE project_id=? AND research_cycle=? AND max_regret IS NOT NULL ORDER BY max_regret,id LIMIT 1`,[projectId,cycle]);
-      return {...s,avg_boundary:Number(s.boundary_count||0)>0?Number(s.boundary_sum||0)/Number(s.boundary_count):null,min_regret:min?.max_regret??null,regret_updated_at:s.regret_updated_at||min?.updated_at||null};
+      const nn=v=>Math.max(0,Number(v||0));
+      const clean={...s,total:nn(s.total),unevaluated:nn(s.unevaluated),feasible:nn(s.feasible),infeasible:nn(s.infeasible),unresolved:nn(s.unresolved),boundary_count:nn(s.boundary_count),boundary_sum:Math.max(0,Number(s.boundary_sum||0)),simulation_total:nn(s.simulation_total),simulation_exploration:nn(s.simulation_exploration),simulation_refinement:nn(s.simulation_refinement),simulation_confirmation:nn(s.simulation_confirmation),simulation_robust:nn(s.simulation_robust)};
+      return {...clean,avg_boundary:clean.boundary_count>0?clean.boundary_sum/clean.boundary_count:null,min_regret:min?.max_regret??null,regret_updated_at:s.regret_updated_at||min?.updated_at||null};
     }
   }catch{}
   const fallback=await env.DB.batch([

@@ -94,7 +94,23 @@ async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={
     (SELECT COUNT(DISTINCT NULLIF(rt.participant_hash,'anonymous')) FROM reviewer_trials rt WHERE rt.project_id=p.id AND rt.protocol_version=? AND rt.research_cycle=? AND rt.status IN ('pending','done')) protocol_participants,
     ${publicationSql} publication_participants
     FROM projects p WHERE p.id=?`,binds);
-  if(row)row.eligible_participants=Number(row.protocol_participants||0);
+  if(row){
+    row.eligible_participants=Number(row.protocol_participants||0);
+    // Frozen historical subjects are retained across research-cycle upgrades.
+    // Never equate cumulative completed subjects with current-cycle QC eligibility.
+    const history=await one(env.DB,`SELECT COUNT(*) n FROM (
+      SELECT rt.research_cycle,rt.protocol_version,rt.participant_hash
+      FROM reviewer_trials rt WHERE rt.project_id=? AND rt.status='done'
+        AND NULLIF(rt.participant_hash,'anonymous') IS NOT NULL
+      GROUP BY rt.research_cycle,rt.protocol_version,rt.participant_hash
+      HAVING SUM(CASE WHEN rt.trial_phase='main' THEN 1 ELSE 0 END)>=?
+        AND SUM(CASE WHEN rt.trial_phase='attention' THEN 1 ELSE 0 END)>=?
+        AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=?
+          AND q.participant_hash=rt.participant_hash AND q.research_cycle=rt.research_cycle
+          AND q.protocol_version=rt.protocol_version AND q.severity='EXCLUDE')
+    )`,[projectId,mainN,attentionN,projectId]);
+    row.historical_completed_participants=Number(history?.n||0);
+  }
   return row;
 }
 
@@ -230,7 +246,7 @@ async function api(request,env,ctx=null){
         empiricalReadiness(env,projectId),latestProtocol(env,projectId),approvalGates(env,projectId),humanStats(env,projectId,cycle,humanProtocol,{},{publication:false})
       ]);
 
-      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:{...counts,regret_meta:regretMeta},approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.observations||0),human_participants:Number(human?.participants||0),human_eligible_participants:Number(human?.eligible_participants||0),empirical,protocol});
+      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:{...counts,regret_meta:regretMeta},approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.observations||0),human_participants:Number(human?.participants||0),human_eligible_participants:Number(human?.eligible_participants||0),human_historical_completed_participants:Number(human?.historical_completed_participants||0),empirical,protocol});
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); if(env.COMPUTE_EXECUTOR==='github-actions'){await enqueueOnce(env,projectId,'advance_project',{},98);return json({status:'queued',transport:'github-actions'});} const r=await advanceProject(env,projectId); const recovery=env.COMPUTE_EXECUTOR==='hybrid'?await recoverHybridStall(env,{reason:'manual_project_run'}):null; return json({advance:r,recovery,transport:env.COMPUTE_EXECUTOR==='hybrid'?'hybrid-self-heal':env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
@@ -331,7 +347,7 @@ async function api(request,env,ctx=null){
       const [{r,stale},liveHuman]=await Promise.all([loadReport(),humanStats(env,projectId,Number(p?.research_cycle||1),hp?.human_protocol||null,{main_n:hp?.human_main_n,attention_n:hp?.human_attention_n})]);
       const minHuman=Number(hp?.min_human_participants||32);
       if(stale && Number(liveHuman?.protocol_participants||0)>=minHuman) await enqueueOnce(env,projectId,'generate_report',{},105,1);
-      const liveNotice=`> 현재 저장된 인간실험: 누적 참가자 ${Number(liveHuman?.participants||0)}명 / 관측 ${Number(liveHuman?.observations||0)}건, 현재 인간실험 규약 대상 ${Number(liveHuman?.protocol_participants||0)}명, 주분석 적격 완료 ${Number(liveHuman?.publication_participants||0)}명(사전 기준 ${minHuman}명).
+      const liveNotice=`> 현재 저장된 인간실험: 누적 참가자 ${Number(liveHuman?.participants||0)}명 / 관측 ${Number(liveHuman?.observations||0)}건, 현재 인간실험 규약 대상 ${Number(liveHuman?.protocol_participants||0)}명, 주분석 적격 완료 ${Number(liveHuman?.publication_participants||0)}명(사전 기준 ${minHuman}명), 과거 주기·규약별 완료 기록 ${Number(liveHuman?.historical_completed_participants||0)}명(주기 간 중복 가능).
 > 아래 본문의 수치·표는 보고서 작성 당시의 증거 스냅샷(Cycle ${r?.research_cycle||'-'} · Evidence r${r?.evidence_revision??'-'})입니다.${stale?' 현재 보고서는 이전 증거 스냅샷이며 최신 보고서 재생성을 자동 요청했습니다.':''} 단, 논문 사용 전 점검 사항의 인간 참가자 현황은 현재 DB 상태를 반영해 표시합니다.
 
 `;

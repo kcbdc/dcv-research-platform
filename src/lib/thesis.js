@@ -239,6 +239,56 @@ export async function buildThesisData(env, projectId) {
     note:'Current-project result only. Every displayed count is calculated from this project current candidate_validation_matrix for the active research_cycle/evidence_revision; no illustrative or example survivor counts are inserted. Strict cumulative funnel: a candidate advances only after PASS at every available preceding gate. HOLD and candidate-level N/A are pending, not survivors. If an entire validation layer is unavailable, the preceding count is carried forward and that layer is labelled N/A.'
   };
 
+  // Preserve the last computed Matrix/Funnel as a visibly dated historical snapshot
+  // when a runtime/protocol version creates a fresh cycle with no calculated gates.
+  // The archive is NOT presented as a confirmation of the new cycle/revision.
+  if(cands.length===0 || matrixSummary.every(x=>x.observed===0)){
+    const previous=await one(env.DB,`SELECT research_cycle,evidence_revision,MAX(updated_at) updated_at
+      FROM candidate_validation_matrix WHERE project_id=? AND
+      (research_cycle<? OR (research_cycle=? AND evidence_revision<?))
+      GROUP BY research_cycle,evidence_revision
+      ORDER BY research_cycle DESC,evidence_revision DESC LIMIT 1`,[projectId,cycle,cycle,rev]);
+    if(previous){
+      const old=await all(env.DB,`SELECT m.*,c.estimator,c.sigma,c.alpha,c.authority_k,c.delay_d
+        FROM candidate_validation_matrix m JOIN design_candidates c ON c.id=m.candidate_id
+        WHERE m.project_id=? AND m.research_cycle=? AND m.evidence_revision=?`,
+        [projectId,previous.research_cycle,previous.evidence_revision]);
+      if(old.length){
+        const mapKeys={historical:'historical_status',synthetic:'synthetic_status',adversarial:'adversarial_status',bis:'bis_status',ecb:'ecb_status',human:'human_status'};
+        const normalize=x=>x==='NA'?'MISSING':x;
+        const archived=old.map((r,i)=>({candidate_id:r.candidate_id,label:`${String(r.estimator||'ema').toUpperCase()} · σ=${r.sigma} · α=${r.alpha} · K=${r.authority_k}`,rank:i+1,statuses:Object.fromEntries(Object.entries(mapKeys).map(([k,v])=>[k,wrapStatus(normalize(r[v]||'NA'))]))}));
+        validation_matrix.rows=archived;
+        validation_matrix.total_candidates=old.length;
+        validation_matrix.displayed_rows=old.length;
+        validation_matrix.summary=STAGE_KEYS.map(([k,label])=>{
+          const counts={PASS:0,FAIL:0,HOLD:0,MISSING:0};
+          for(const r of archived)counts[r.statuses[k].code]++;
+          const observed=old.length-counts.MISSING;
+          return {stage_key:k,stage:label,...counts,total:old.length,observed,coverage:observed/old.length,survival_rate:observed?counts.PASS/observed:0};
+        });
+        validation_matrix.snapshot={research_cycle:Number(previous.research_cycle),evidence_revision:Number(previous.evidence_revision),updated_at:previous.updated_at,stale:true,basis:'LAST_KNOWN_VALID_SNAPSHOT'};
+        const stages=[{key:'baseline',stage:'Candidate pool',total:old.length,survivors:old.length,eliminated:0,pending:0,unavailable:false,survival_rate:1}];
+        let pool=archived;
+        for(const [k,label] of FUNNEL_ORDER){
+          const observed=archived.some(r=>r.statuses[k].code!=='MISSING');
+          if(!observed){stages.push({key:k,stage:label,total:pool.length,survivors:pool.length,eliminated:0,pending:pool.length,unavailable:true,survival_rate:pool.length/old.length});continue;}
+          const next=pool.filter(r=>r.statuses[k].code==='PASS');
+          stages.push({key:k,stage:label,total:pool.length,survivors:next.length,eliminated:pool.filter(r=>r.statuses[k].code==='FAIL').length,pending:pool.filter(r=>!['PASS','FAIL'].includes(r.statuses[k].code)).length,unavailable:false,survival_rate:next.length/old.length});
+          pool=next;
+        }
+        survival_funnel.stages=stages;
+        survival_funnel.initial_candidates=old.length;
+        survival_funnel.final_survivors=pool.length;
+        survival_funnel.final_rate=pool.length/old.length;
+        survival_funnel.research_cycle=Number(previous.research_cycle);
+        survival_funnel.evidence_revision=Number(previous.evidence_revision);
+        survival_funnel.generated_at=previous.updated_at;
+        survival_funnel.basis='LAST_KNOWN_VALID_SNAPSHOT';
+        survival_funnel.stale=true;
+      }
+    }
+  }
+
   const phaseAgg = new Map();
   for (const r of runRows) { const e = phaseAgg.get(r.phase) || { phase: r.phase, runs: 0, episodes: 0, decisions: 0 }; e.runs++; e.episodes += Number(r.n) || 0; e.decisions += Number(r.decisions) || 0; phaseAgg.set(r.phase, e); }
   const phases = [...phaseAgg.values()].sort((a, b) => (a.phase < b.phase ? -1 : a.phase > b.phase ? 1 : 0));

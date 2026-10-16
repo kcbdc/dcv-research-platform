@@ -110,6 +110,9 @@ async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={
           AND q.protocol_version=rt.protocol_version AND q.severity='EXCLUDE')
     )`,[projectId,mainN,attentionN,projectId]);
     row.historical_completed_participants=Number(history?.n||0);
+    // Administrative carry-forward: visible in the active cycle, but does not assert new-cycle protocol/QC eligibility.
+    row.carried_forward_participants=Number(history?.n||0);
+    row.participant_roster_display=Number(row.protocol_participants||0) + Number(history?.n||0);
   }
   return row;
 }
@@ -246,7 +249,7 @@ async function api(request,env,ctx=null){
         empiricalReadiness(env,projectId),latestProtocol(env,projectId),approvalGates(env,projectId),humanStats(env,projectId,cycle,humanProtocol,{},{publication:false})
       ]);
 
-      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:{...counts,regret_meta:regretMeta},approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.observations||0),human_participants:Number(human?.participants||0),human_eligible_participants:Number(human?.eligible_participants||0),human_historical_completed_participants:Number(human?.historical_completed_participants||0),empirical,protocol});
+      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:{...counts,regret_meta:regretMeta},approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.observations||0),human_participants:Number(human?.participants||0),human_eligible_participants:Number(human?.eligible_participants||0),human_historical_completed_participants:Number(human?.historical_completed_participants||0),human_carried_forward_participants:Number(human?.carried_forward_participants||0),human_participant_roster_display:Number(human?.participant_roster_display||0),empirical,protocol});
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); if(env.COMPUTE_EXECUTOR==='github-actions'){await enqueueOnce(env,projectId,'advance_project',{},98);return json({status:'queued',transport:'github-actions'});} const r=await advanceProject(env,projectId); const recovery=env.COMPUTE_EXECUTOR==='hybrid'?await recoverHybridStall(env,{reason:'manual_project_run'}):null; return json({advance:r,recovery,transport:env.COMPUTE_EXECUTOR==='hybrid'?'hybrid-self-heal':env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }

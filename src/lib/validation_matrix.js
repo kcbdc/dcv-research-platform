@@ -50,7 +50,10 @@ export async function getValidationMatrix(env,projectId){
   const p=await one(env.DB,`SELECT name,research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
   const currentCycle=Number(p.research_cycle||1),currentRev=Number(p.evidence_revision||0);
   let cycle=currentCycle,rev=currentRev,rows=await matrixRows(env,projectId,cycle,rev),stale=false,snapshotUpdatedAt=null;
-  if(!rows.length){
+  // A new revision can contain placeholder NA rows. Treat them as not yet validated,
+  // retaining the last informative snapshot instead of rendering a wiped figure.
+  const noObservedGates = rs => !rs.some(r=>DIMS.some(k=>['PASS','FAIL','HOLD'].includes(r[k.toLowerCase()+'_status'])));
+  if(!rows.length || noObservedGates(rows)){
     const snap=await one(env.DB,`SELECT research_cycle,evidence_revision,MAX(updated_at) updated_at FROM candidate_validation_matrix WHERE project_id=? AND (research_cycle<? OR (research_cycle=? AND evidence_revision<?)) GROUP BY research_cycle,evidence_revision ORDER BY research_cycle DESC,evidence_revision DESC LIMIT 1`,[projectId,currentCycle,currentCycle,currentRev]);
     if(snap){ cycle=Number(snap.research_cycle||1);rev=Number(snap.evidence_revision||0);snapshotUpdatedAt=snap.updated_at||null;rows=await matrixRows(env,projectId,cycle,rev);stale=rows.length>0; }
   }

@@ -98,21 +98,28 @@ async function humanStats(env,projectId,cycle,humanProtocol='main_v2',settings={
     row.eligible_participants=Number(row.protocol_participants||0);
     // Frozen historical subjects are retained across research-cycle upgrades.
     // Never equate cumulative completed subjects with current-cycle QC eligibility.
-    const history=await one(env.DB,`SELECT COUNT(*) n FROM (
-      SELECT rt.research_cycle,rt.protocol_version,rt.participant_hash
+    const history=await one(env.DB,`WITH completed AS (
+      SELECT rt.protocol_version,rt.research_cycle,rt.participant_hash
       FROM reviewer_trials rt WHERE rt.project_id=? AND rt.status='done'
         AND NULLIF(rt.participant_hash,'anonymous') IS NOT NULL
-      GROUP BY rt.research_cycle,rt.protocol_version,rt.participant_hash
+      GROUP BY rt.protocol_version,rt.research_cycle,rt.participant_hash
       HAVING SUM(CASE WHEN rt.trial_phase='main' THEN 1 ELSE 0 END)>=?
         AND SUM(CASE WHEN rt.trial_phase='attention' THEN 1 ELSE 0 END)>=?
-        AND NOT EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=?
+        AND NOT EXISTS (SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=?
           AND q.participant_hash=rt.participant_hash AND q.research_cycle=rt.research_cycle
           AND q.protocol_version=rt.protocol_version AND q.severity='EXCLUDE')
-    )`,[projectId,mainN,attentionN,projectId]);
+    ) SELECT COUNT(DISTINCT participant_hash) n,
+       COUNT(DISTINCT CASE WHEN NOT EXISTS (
+         SELECT 1 FROM reviewer_trials active WHERE active.project_id=?
+           AND active.protocol_version=? AND active.research_cycle=?
+           AND active.status IN ('pending','done') AND active.participant_hash=completed.participant_hash
+       ) THEN participant_hash END) prior_only
+    FROM completed`,[projectId,mainN,attentionN,projectId,projectId,protocol,c]);
     row.historical_completed_participants=Number(history?.n||0);
-    // Administrative carry-forward: visible in the active cycle, but does not assert new-cycle protocol/QC eligibility.
-    row.carried_forward_participants=Number(history?.n||0);
-    row.participant_roster_display=Number(row.protocol_participants||0) + Number(history?.n||0);
+    // Never double count a person who has participated in both a previous and current cycle.
+    // A completed historical record remains visible, but does not automatically pass the new QC gate.
+    row.carried_forward_participants=Number(history?.prior_only||0);
+    row.participant_roster_display=Number(row.protocol_participants||0)+row.carried_forward_participants;
   }
   return row;
 }

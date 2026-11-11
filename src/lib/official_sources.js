@@ -32,13 +32,23 @@ function sdmxValue(row){return num(pick(row,['OBS_VALUE','value','Value','DATA_V
 function sdmxUnit(row,hint=''){return String(pick(row,['UNIT_MEASURE','UNIT','UNIT_NAME','unit'])||hint||'');}
 
 async function responseText(url,opts={}){
+  const {timeoutMs=20000,retries=0,...fopts}=opts;
   const host=(()=>{try{return new URL(url).hostname;}catch{return 'unknown_host';}})();
-  let r;
-  try{r=await fetch(url,{...opts,headers:{'User-Agent':'dcv-research-platform/0.10','Accept':'application/json, text/csv, application/xml, */*',...(opts.headers||{})},signal:opts.signal||AbortSignal.timeout(20000)});}
-  catch(e){const name=String(e?.name||'');throw new Error(name==='TimeoutError'||name==='AbortError'?`FETCH_TIMEOUT:${host}`:`FETCH_FAILED:${host}:${String(e?.message||e).slice(0,120)}`);}
-  const text=await r.text();
-  if(!r.ok)throw new Error(`HTTP_${r.status}:${host}:${text.replace(/\s+/g,' ').slice(0,120)}`);
-  return {text,ct:r.headers.get('content-type')||'',status:r.status};
+  let last=null;
+  for(let attempt=0;attempt<=retries;attempt++){
+    const t0=Date.now();
+    try{
+      const r=await fetch(url,{...fopts,headers:{'User-Agent':'dcv-research-platform/0.10','Accept':'application/json, text/csv, application/xml, */*',...(fopts.headers||{})},signal:fopts.signal||AbortSignal.timeout(timeoutMs)});
+      const text=await r.text();
+      if(!r.ok){const e=new Error(`HTTP_${r.status}:${host}:${text.replace(/\s+/g,' ').slice(0,120)}`);e.noRetry=r.status<500&&r.status!==429&&r.status!==408;throw e;}
+      return {text,ct:r.headers.get('content-type')||'',status:r.status};
+    }catch(e){
+      if(String(e?.message||'').startsWith('HTTP_')){last=e;if(e.noRetry)throw e;}
+      else{const name=String(e?.name||''),ms=Date.now()-t0;last=new Error(name==='TimeoutError'||name==='AbortError'?`FETCH_TIMEOUT:${host}:${ms}ms:attempt${attempt+1}/${retries+1}`:`FETCH_FAILED:${host}:${String(e?.message||e).slice(0,120)}`);}
+      if(attempt<retries)await new Promise(r=>setTimeout(r,1000*(attempt+1)));
+    }
+  }
+  throw last;
 }
 // Parse a JSON API body; a non-JSON body (HTML error page, XML, empty) becomes a labelled error instead of a bare SyntaxError.
 function parseJsonBody(text,label){
@@ -54,13 +64,15 @@ function ecosResult(j){
 }
 
 function bisUrl(cfg,s){const q=new URLSearchParams();if(cfg.start_period)q.set('startPeriod',cfg.start_period);if(cfg.end_period)q.set('endPeriod',cfg.end_period);return `https://stats.bis.org/api/v2/data/dataflow/${encodeURIComponent(cfg.agency||'BIS')}/${encodeURIComponent(cfg.dataset||'WS_CPMI_CASHLESS')}/${encodeURIComponent(cfg.version||'1.0')}/${s.key}${q.size?'?'+q:''}`;}
+const SDMX_FETCH={timeoutMs:30000,retries:1};
 async function collectBis(cfg){
-  const out=[]; for(const s of cfg.series||[]){const {text}=await responseText(bisUrl(cfg,s),{headers:{Accept:'application/vnd.sdmx.data+csv;version=1.0.0'}});const rows=csvRows(text);for(const r of rows){const period=sdmxPeriod(r),v=sdmxValue(r);if(!period||v==null)continue;out.push({jurisdiction:s.jurisdiction||pick(r,['REPORTING_COUNTRY','REF_AREA'])||null,metric_code:s.metric_code||'bis.series',series_key:s.key,period,value_num:v,unit:sdmxUnit(r,s.unit_hint),dimensions:r,payload:r});}}
-  return out;
+  const parts=await Promise.all((cfg.series||[]).map(async s=>{const {text}=await responseText(bisUrl(cfg,s),{...SDMX_FETCH,headers:{Accept:'application/vnd.sdmx.data+csv;version=1.0.0'}});const out=[];for(const r of csvRows(text)){const period=sdmxPeriod(r),v=sdmxValue(r);if(!period||v==null)continue;out.push({jurisdiction:s.jurisdiction||pick(r,['REPORTING_COUNTRY','REF_AREA'])||null,metric_code:s.metric_code||'bis.series',series_key:s.key,period,value_num:v,unit:sdmxUnit(r,s.unit_hint),dimensions:r,payload:r});}return out;}));
+  return parts.flat();
 }
 function ecbUrl(cfg,s){const q=new URLSearchParams({format:'csvdata'});if(cfg.start_period)q.set('startPeriod',cfg.start_period);if(cfg.end_period)q.set('endPeriod',cfg.end_period);return `https://data-api.ecb.europa.eu/service/data/SUP/${s.key}?${q}`;}
 async function collectEcb(cfg){
-  const out=[];for(const s of cfg.series||[]){const {text}=await responseText(ecbUrl(cfg,s),{headers:{Accept:'text/csv'}});for(const r of csvRows(text)){const period=sdmxPeriod(r),v=sdmxValue(r);if(!period||v==null)continue;out.push({jurisdiction:s.jurisdiction||pick(r,['REF_AREA'])||null,metric_code:s.metric_code||'ecb.sup.series',series_key:s.key,period,value_num:v,unit:sdmxUnit(r,s.unit_hint),dimensions:r,payload:r});}}return out;
+  const parts=await Promise.all((cfg.series||[]).map(async s=>{const {text}=await responseText(ecbUrl(cfg,s),{...SDMX_FETCH,headers:{Accept:'text/csv'}});const out=[];for(const r of csvRows(text)){const period=sdmxPeriod(r),v=sdmxValue(r);if(!period||v==null)continue;out.push({jurisdiction:s.jurisdiction||pick(r,['REF_AREA'])||null,metric_code:s.metric_code||'ecb.sup.series',series_key:s.key,period,value_num:v,unit:sdmxUnit(r,s.unit_hint),dimensions:r,payload:r});}return out;}));
+  return parts.flat();
 }
 function ecosItemListUrl(key,cfg){return `https://ecos.bok.or.kr/api/StatisticItemList/${encodeURIComponent(key)}/json/kr/1/1000/${encodeURIComponent(cfg.stat_code)}`;}
 async function resolveEcosPeriods(key,cfg){
@@ -136,7 +148,8 @@ const ERROR_HINTS=[
   [/ECOS(?:_ITEM)?:(?:ERROR-500|ERROR-601|ERROR-602)/,'upstream_error','ECOS 서버 오류 또는 호출 한도 초과입니다. 잠시 후 다시 시도하세요.'],
   [/ECOS_ITEM_NOT_FOUND/,'item_not_found','StatisticItemList에서 해당 item_code1/cycle 조합을 찾지 못했습니다. ECOS 통계표의 항목코드와 주기를 확인하세요.'],
   [/NON_JSON_RESPONSE|EMPTY_RESPONSE/,'non_json_response','상대 서버가 JSON이 아닌 응답(HTML/XML/빈 응답)을 반환했습니다. 인증키, 접근 차단 또는 점검 여부를 확인하세요.'],
-  [/FETCH_TIMEOUT/,'timeout','상대 서버 응답이 20초 내에 오지 않았습니다. 잠시 후 다시 시도하세요.'],
+  [/FETCH_TIMEOUT:data-api\.ecb\.europa\.eu/,'timeout_ecb','ECB 서버가 재시도 후에도 응답하지 않았습니다. ECB 데이터 API가 느리거나 Cloudflare Worker의 접속을 지연시키는 경우입니다. 브라우저에서 아래 URL이 바로 열리는지 확인하세요: https://data-api.ecb.europa.eu/service/data/SUP/Q.B01.W0._Z.I3017._T.SII._Z._Z._Z.PCT.C?format=csvdata&startPeriod=2015-Q1 — 열린다면 Worker 접속 차단이므로 GitHub Actions 러너로 수집하세요(Actions 탭 → Run workflow). 이 소스는 30분 뒤 자동 재시도됩니다.'],
+  [/FETCH_TIMEOUT/,'timeout','상대 서버 응답이 제한 시간(재시도 포함) 내에 오지 않았습니다. 잠시 후 다시 시도하세요.'],
   [/FETCH_FAILED/,'network_error','상대 서버에 연결하지 못했습니다(Cloudflare Worker 외부 호출 실패). 도메인 차단/일시 장애 여부를 확인하세요.'],
   [/HTTP_(401|403)/,'forbidden','인증 실패 또는 접근 차단입니다. API 키와 서비스 이용 승인 상태를 확인하세요.'],
   [/HTTP_(429)/,'rate_limited','호출 한도를 초과했습니다. 잠시 후 다시 시도하세요.'],
@@ -178,6 +191,7 @@ export async function testOfficialConnector(env,connectorId,config={}){
   const d=OFFICIAL_CONNECTORS[connectorId];if(!d)throw new Error('unknown_connector');const cfg={...d.default_config,...config};let pack,rows;
   if(connectorId==='bok_ecos'){pack=await collectEcos(env,cfg);rows=pack.rows;}
   else if(connectorId==='openfiscal'){pack=await collectOpenFiscal(env,cfg);rows=pack.rows;}
+  else if(connectorId==='bis_cpmi'||connectorId==='ecb_supervisory'){const t0=Date.now();rows=connectorId==='bis_cpmi'?await collectBis(cfg):await collectEcb(cfg);pack={meta:{elapsed_ms:Date.now()-t0,series:(cfg.series||[]).length}};}
   else throw new Error('connector_test_not_supported');
   const periods=rows.map(x=>String(x.period||'')).filter(Boolean).sort();return {ok:true,connector_id:connectorId,fetched:rows.length,first_period:periods[0]||null,last_period:periods.at(-1)||null,metrics:[...new Set(rows.map(x=>x.metric_code))],meta:pack?.meta||null};
 }

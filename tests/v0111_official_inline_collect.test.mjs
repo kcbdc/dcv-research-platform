@@ -47,3 +47,16 @@ test('emergency flag lets the hybrid Worker claim a stranded collect_project; no
   const em=Object.assign(Object.create(env),{EMERGENCY_WORKER_COMPUTE:'1'});
   const got=await claimJobs(em,4);assert.equal(got.length,1);assert.equal(got[0].type,'collect_project');
 });
+
+test('ECB collector retries a timeout once, fetches series in parallel, and labels persistent timeouts',async()=>{
+  const {testOfficialConnectorSafe}=await import('../src/lib/official_sources.js');
+  const old=globalThis.fetch;let calls=0;const csv='KEY,TIME_PERIOD,OBS_VALUE,UNIT_MEASURE\nx,2024-Q1,150.5,PCT\n';
+  try{
+    globalThis.fetch=async()=>{calls++;if(calls===1){const e=new Error('t');e.name='TimeoutError';throw e;}return new Response(csv,{status:200});};
+    let r=await testOfficialConnectorSafe({},'ecb_supervisory',{});
+    assert.equal(r.ok,true);assert.equal(r.fetched,2);assert.ok(calls>=3);
+    globalThis.fetch=async()=>{const e=new Error('t');e.name='TimeoutError';throw e;};
+    r=await testOfficialConnectorSafe({},'ecb_supervisory',{});
+    assert.equal(r.ok,false);assert.equal(r.code,'timeout_ecb');assert.match(r.error,/FETCH_TIMEOUT:data-api\.ecb\.europa\.eu:\d+ms:attempt2\/2/);
+  }finally{globalThis.fetch=old;}
+});

@@ -45,3 +45,9 @@
 - `claimJobs`: `EMERGENCY_WORKER_COMPUTE` 반영(collect_project 한정).
 - 상태 응답에 `pipeline`(큐 대기 수, Actions 설정/러너 상태) 추가, UI에 대기 사유 표시.
 - 테스트: `tests/v0111_official_inline_collect.test.mjs` 4건.
+
+# v0.10.11 (추가) — ECB `FETCH_TIMEOUT:data-api.ecb.europa.eu`
+- 설정된 ECB SUP 시리즈 키(I3017 LCR, I4008 CET1 등)는 ECB 데이터 포털에 실제 존재함을 확인 → 키 문제가 아니라 응답 지연/접속 문제.
+- BIS·ECB(SDMX) 수집: 타임아웃 30초 + 1회 재시도, 시리즈 병렬 조회. 타임아웃 오류에 경과시간·시도 횟수 포함.
+- ECB 전용 힌트(`timeout_ecb`): 브라우저 확인 URL과 GitHub Actions 대체 수집 안내.
+- `testOfficialConnector`가 `bis_cpmi`/`ecb_supervisory`도 지원(소요 시간 `elapsed_ms` 반환).

@@ -91,3 +91,33 @@ test('official observation upsert has O(1) read queries, not one SELECT per inco
   await officialTest.upsertObservations({DB:wrapped},'p',source,rows);assert.equal(reads,1);assert.equal(DB.raw.prepare(`SELECT COUNT(*) n FROM official_observations`).get().n,120);
   reads=0;await officialTest.upsertObservations({DB:wrapped},'p',source,rows);assert.equal(reads,1,'unchanged re-sync must use one prefetch read regardless of row count');
 });
+
+test('connector test route helper never throws and explains ECOS failures',async()=>{
+  const {testOfficialConnectorSafe,explainConnectorError}=await import('../src/lib/official_sources.js');
+  const old=globalThis.fetch;
+  try{
+    // non-JSON (HTML) body used to raise a bare SyntaxError -> HTTP 500
+    globalThis.fetch=async()=>new Response('<html>blocked</html>',{status:200,headers:{'content-type':'text/html'}});
+    let r=await testOfficialConnectorSafe({ECOS_API_KEY:' secret\n'},'bok_ecos',{});
+    assert.equal(r.ok,false);assert.equal(r.code,'non_json_response');
+    // ECOS error code returned with HTTP 200
+    globalThis.fetch=async()=>new Response(JSON.stringify({RESULT:{CODE:'INFO-100',MESSAGE:'인증키가 유효하지 않습니다.'}}),{status:200});
+    r=await testOfficialConnectorSafe({ECOS_API_KEY:'bad'},'bok_ecos',{});
+    assert.equal(r.code,'invalid_api_key');
+    // network failure
+    globalThis.fetch=async()=>{throw new TypeError('network down');};
+    r=await testOfficialConnectorSafe({ECOS_API_KEY:'k'},'bok_ecos',{});
+    assert.equal(r.code,'network_error');
+    // missing secret
+    r=await testOfficialConnectorSafe({},'bok_ecos',{});
+    assert.equal(r.code,'secret_missing');
+    assert.equal(explainConnectorError(new Error('weird')).code,'unexpected_error');
+  }finally{globalThis.fetch=old;}
+});
+test('ECOS key is trimmed and item list requests 1000 items',async()=>{
+  const {__test}=await import('../src/lib/official_sources.js');const old=globalThis.fetch,calls=[];
+  globalThis.fetch=async u=>{calls.push(String(u));return new Response(JSON.stringify(String(u).includes('StatisticItemList')?{StatisticItemList:{row:[{ITEM_CODE:'ABA1',CYCLE:'M',START_TIME:'200310',END_TIME:'202609',ITEM_NAME:'x',UNIT_NAME:'u'}]}}:{StatisticSearch:{row:[{STAT_CODE:'102Y004',ITEM_CODE1:'ABA1',TIME:'202609',DATA_VALUE:'1',UNIT_NAME:'u'}]}}));};
+  try{const r=await __test.collectEcos({ECOS_API_KEY:'  secret\n'},{stat_code:'102Y004',cycle:'M',start_period:'200310',end_period:'latest',item_code1:'ABA1',metric_code:'m',jurisdiction:'KR'});
+    assert.equal(r.rows.length,1);assert.ok(calls[0].includes('/secret/json/kr/1/1000/102Y004'));assert.ok(!calls.some(c=>c.includes('%0A')));}
+  finally{globalThis.fetch=old;}
+});

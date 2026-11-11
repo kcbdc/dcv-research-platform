@@ -30,7 +30,27 @@ function sdmxPeriod(row){return String(pick(row,['TIME_PERIOD','TIME','time_peri
 function sdmxValue(row){return num(pick(row,['OBS_VALUE','value','Value','DATA_VALUE']));}
 function sdmxUnit(row,hint=''){return String(pick(row,['UNIT_MEASURE','UNIT','UNIT_NAME','unit'])||hint||'');}
 
-async function responseText(url,opts={}){const r=await fetch(url,{...opts,signal:opts.signal||AbortSignal.timeout(20000)});if(!r.ok)throw new Error(`HTTP ${r.status} ${new URL(url).hostname}`);return {text:await r.text(),ct:r.headers.get('content-type')||'',status:r.status};}
+async function responseText(url,opts={}){
+  const host=(()=>{try{return new URL(url).hostname;}catch{return 'unknown_host';}})();
+  let r;
+  try{r=await fetch(url,{...opts,headers:{'User-Agent':'dcv-research-platform/0.10','Accept':'application/json, text/csv, application/xml, */*',...(opts.headers||{})},signal:opts.signal||AbortSignal.timeout(20000)});}
+  catch(e){const name=String(e?.name||'');throw new Error(name==='TimeoutError'||name==='AbortError'?`FETCH_TIMEOUT:${host}`:`FETCH_FAILED:${host}:${String(e?.message||e).slice(0,120)}`);}
+  const text=await r.text();
+  if(!r.ok)throw new Error(`HTTP_${r.status}:${host}:${text.replace(/\s+/g,' ').slice(0,120)}`);
+  return {text,ct:r.headers.get('content-type')||'',status:r.status};
+}
+// Parse a JSON API body; a non-JSON body (HTML error page, XML, empty) becomes a labelled error instead of a bare SyntaxError.
+function parseJsonBody(text,label){
+  const t=String(text||'').trim();
+  if(!t)throw new Error(`${label}_EMPTY_RESPONSE`);
+  try{return JSON.parse(t);}catch{throw new Error(`${label}_NON_JSON_RESPONSE:${t.replace(/\s+/g,' ').slice(0,100)}`);}
+}
+// ECOS reports failures as {RESULT:{CODE,MESSAGE}} (or a top-level CODE/MESSAGE) with HTTP 200.
+function ecosResult(j){
+  if(j?.RESULT)return j.RESULT;
+  if(j&&j.CODE&&j.MESSAGE&&!j.StatisticSearch&&!j.StatisticItemList)return {CODE:j.CODE,MESSAGE:j.MESSAGE};
+  return null;
+}
 
 function bisUrl(cfg,s){const q=new URLSearchParams();if(cfg.start_period)q.set('startPeriod',cfg.start_period);if(cfg.end_period)q.set('endPeriod',cfg.end_period);return `https://stats.bis.org/api/v2/data/dataflow/${encodeURIComponent(cfg.agency||'BIS')}/${encodeURIComponent(cfg.dataset||'WS_CPMI_CASHLESS')}/${encodeURIComponent(cfg.version||'1.0')}/${s.key}${q.size?'?'+q:''}`;}
 async function collectBis(cfg){
@@ -41,15 +61,15 @@ function ecbUrl(cfg,s){const q=new URLSearchParams({format:'csvdata'});if(cfg.st
 async function collectEcb(cfg){
   const out=[];for(const s of cfg.series||[]){const {text}=await responseText(ecbUrl(cfg,s),{headers:{Accept:'text/csv'}});for(const r of csvRows(text)){const period=sdmxPeriod(r),v=sdmxValue(r);if(!period||v==null)continue;out.push({jurisdiction:s.jurisdiction||pick(r,['REF_AREA'])||null,metric_code:s.metric_code||'ecb.sup.series',series_key:s.key,period,value_num:v,unit:sdmxUnit(r,s.unit_hint),dimensions:r,payload:r});}}return out;
 }
-function ecosItemListUrl(key,cfg){return `https://ecos.bok.or.kr/api/StatisticItemList/${encodeURIComponent(key)}/json/kr/1/10/${encodeURIComponent(cfg.stat_code)}`;}
+function ecosItemListUrl(key,cfg){return `https://ecos.bok.or.kr/api/StatisticItemList/${encodeURIComponent(key)}/json/kr/1/1000/${encodeURIComponent(cfg.stat_code)}`;}
 async function resolveEcosPeriods(key,cfg){
   if(cfg.end_period&&cfg.end_period!=='latest'&&cfg.start_period)return cfg;
-  const {text}=await responseText(ecosItemListUrl(key,cfg));const j=JSON.parse(text);if(j.RESULT)throw new Error(`ECOS_ITEM:${j.RESULT.CODE}:${j.RESULT.MESSAGE}`);
+  const {text}=await responseText(ecosItemListUrl(key,cfg));const j=parseJsonBody(text,'ECOS_ITEM');const res=ecosResult(j);if(res)throw new Error(`ECOS_ITEM:${res.CODE}:${res.MESSAGE}`);
   const rows=j.StatisticItemList?.row||[],hit=rows.find(r=>String(r.ITEM_CODE)===String(cfg.item_code1)&&String(r.CYCLE)===String(cfg.cycle))||rows.find(r=>String(r.ITEM_CODE)===String(cfg.item_code1));
-  if(!hit)throw new Error('ECOS_ITEM_NOT_FOUND');return {...cfg,start_period:cfg.start_period||hit.START_TIME,end_period:cfg.end_period&&cfg.end_period!=='latest'?cfg.end_period:hit.END_TIME,item_name:hit.ITEM_NAME||cfg.item_name,unit_hint:hit.UNIT_NAME||cfg.unit_hint};
+  if(!hit)throw new Error(`ECOS_ITEM_NOT_FOUND:${cfg.stat_code}/${cfg.item_code1}/${cfg.cycle}`);return {...cfg,start_period:cfg.start_period||hit.START_TIME,end_period:cfg.end_period&&cfg.end_period!=='latest'?cfg.end_period:hit.END_TIME,item_name:hit.ITEM_NAME||cfg.item_name,unit_hint:hit.UNIT_NAME||cfg.unit_hint};
 }
 function ecosUrl(key,cfg){const seg=[cfg.stat_code,cfg.cycle,cfg.start_period,cfg.end_period,cfg.item_code1,cfg.item_code2,cfg.item_code3,cfg.item_code4].filter((x,i)=>i<4||(x!=null&&x!==''));return `https://ecos.bok.or.kr/api/StatisticSearch/${encodeURIComponent(key)}/json/kr/1/${Number(cfg.limit||1000)}/${seg.map(x=>encodeURIComponent(x)).join('/')}`;}
-async function collectEcos(env,cfg){const key=secretValue(env,'ECOS_API_KEY');if(!key)throw new Error('ECOS_API_KEY_NOT_CONFIGURED');const resolved=await resolveEcosPeriods(key,cfg);const {text}=await responseText(ecosUrl(key,resolved));const j=JSON.parse(text);if(j.RESULT)throw new Error(`ECOS:${j.RESULT.CODE}:${j.RESULT.MESSAGE}`);const rows=j.StatisticSearch?.row||[];const out=rows.map(r=>({jurisdiction:resolved.jurisdiction||'KR',metric_code:resolved.metric_code||`ecos.${r.STAT_CODE}`,series_key:[r.STAT_CODE,r.ITEM_CODE1,r.ITEM_CODE2,r.ITEM_CODE3,r.ITEM_CODE4].filter(Boolean).join(':'),period:String(r.TIME||''),value_num:num(r.DATA_VALUE),unit:String(r.UNIT_NAME||resolved.unit_hint||''),dimensions:r,payload:r})).filter(x=>x.period&&x.value_num!=null);return {rows:out,meta:{stat_code:resolved.stat_code,item_code:resolved.item_code1,item_name:resolved.item_name||null,cycle:resolved.cycle,start_period:resolved.start_period,end_period:resolved.end_period,total:out.length}};}
+async function collectEcos(env,cfg){const key=secretValue(env,'ECOS_API_KEY');if(!key)throw new Error('ECOS_API_KEY_NOT_CONFIGURED');const resolved=await resolveEcosPeriods(key,cfg);const {text}=await responseText(ecosUrl(key,resolved));const j=parseJsonBody(text,'ECOS');const res=ecosResult(j);if(res)throw new Error(`ECOS:${res.CODE}:${res.MESSAGE}`);const rows=j.StatisticSearch?.row||[];const out=rows.map(r=>({jurisdiction:resolved.jurisdiction||'KR',metric_code:resolved.metric_code||`ecos.${r.STAT_CODE}`,series_key:[r.STAT_CODE,r.ITEM_CODE1,r.ITEM_CODE2,r.ITEM_CODE3,r.ITEM_CODE4].filter(Boolean).join(':'),period:String(r.TIME||''),value_num:num(r.DATA_VALUE),unit:String(r.UNIT_NAME||resolved.unit_hint||''),dimensions:r,payload:r})).filter(x=>x.period&&x.value_num!=null);return {rows:out,meta:{stat_code:resolved.stat_code,item_code:resolved.item_code1,item_name:resolved.item_name||null,cycle:resolved.cycle,start_period:resolved.start_period,end_period:resolved.end_period,total:out.length}};}
 function xmlDecode(s=''){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");}
 function xmlTag(block,tag){const m=String(block).match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,'i'));return m?xmlDecode(m[1].trim()):'';}
 function parseOpenFiscalXml(text){const root=String(text);const code=xmlTag(root,'CODE'),message=xmlTag(root,'MESSAGE'),total=Number(xmlTag(root,'list_total_count')||0);const rows=[...root.matchAll(/<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/gi)].map(m=>({ACNT_YR:xmlTag(m[1],'ACNT_YR'),BDG_FND_DIV_NM:xmlTag(m[1],'BDG_FND_DIV_NM'),ACNT_DIV_NM:xmlTag(m[1],'ACNT_DIV_NM'),SMOK_DIV_NM:xmlTag(m[1],'SMOK_DIV_NM'),SUM_NASS_TREV_BDG_AMT:xmlTag(m[1],'SUM_NASS_TREV_BDG_AMT')}));return {code,message,total,rows};}
@@ -57,7 +77,7 @@ function openFiscalUrl(key,cfg,year,page=1){const u=new URL(cfg.endpoint_url||'h
 async function collectOpenFiscal(env,cfg){const key=secretValue(env,'OPENFISCAL_API_KEY');if(!key)throw new Error('OPENFISCAL_API_KEY_NOT_CONFIGURED');const nowY=new Date().getUTCFullYear(),years=cfg.account_year&&cfg.account_year!=='latest'?[Number(cfg.account_year)]:[nowY,nowY-1,nowY-2];let selected=null,meta=null;
   for(const y of years){const first=await responseText(openFiscalUrl(key,cfg,y,1));const parsed=parseOpenFiscalXml(first.text);if(parsed.code&&parsed.code!=='INFO-000'){if(parsed.code==='INFO-200'||/해당하는 데이터가 없습니다/.test(parsed.message))continue;throw new Error(`OPENFISCAL:${parsed.code}:${parsed.message}`);}if(!parsed.rows.length)continue;let rows=[...parsed.rows],page=1,size=Math.min(1000,Number(cfg.page_size||1000));while(rows.length<parsed.total){page++;if(page>100)throw new Error('OPENFISCAL_PAGINATION_LIMIT');const nxt=parseOpenFiscalXml((await responseText(openFiscalUrl(key,cfg,y,page))).text);if(nxt.code&&nxt.code!=='INFO-000')throw new Error(`OPENFISCAL:${nxt.code}:${nxt.message}`);if(!nxt.rows.length)break;rows.push(...nxt.rows);if(nxt.rows.length<size&&rows.length>=nxt.total)break;}selected=rows;meta={code:parsed.code||'INFO-000',message:parsed.message||'정상 처리되었습니다.',total:parsed.total||rows.length,year:String(y),pages:page};break;}
   if(!selected)throw new Error('OPENFISCAL:NO_DATA_FOR_LATEST_YEARS');const fields=cfg.series_key_fields||['BDG_FND_DIV_NM','ACNT_DIV_NM','SMOK_DIV_NM'];const rows=selected.map(r=>{const period=String(r.ACNT_YR||''),v=num(r.SUM_NASS_TREV_BDG_AMT);return {jurisdiction:cfg.jurisdiction||'KR',metric_code:cfg.metric_code||'openfiscal.revenue.structure',series_key:['OPFI156',...fields.map(k=>r[k]||'-')].join(':'),period,value_num:v,unit:cfg.unit||'source_reported',dimensions:r,payload:r};}).filter(x=>x.period&&x.value_num!=null);return {rows,meta:{...meta,fetched:rows.length}};}
-function secretValue(env,name){const value=name?env[name]:null;if(!value)return value;try{return /%[0-9a-f]{2}/i.test(value)?decodeURIComponent(value):value;}catch{throw new Error('INVALID_KEY_ENCODING');}}
+function secretValue(env,name){let value=name?env[name]:null;if(!value)return value;value=String(value).trim().replace(/^["']|["']$/g,'').trim();if(!value)return null;try{return /%[0-9a-f]{2}/i.test(value)?decodeURIComponent(value):value;}catch{throw new Error('INVALID_KEY_ENCODING');}}
 
 async function collectBojo(env,cfg){
   const key=secretValue(env,'BOJO_API_KEY');if(!key)throw new Error('BOJO_API_KEY_NOT_CONFIGURED');
@@ -107,6 +127,34 @@ export async function collectOfficialSource(env,projectId,source){
   catch(e){await run(env.DB,`UPDATE official_source_sync_runs SET completed_at=?,status='error',error_text=? WHERE id=?`,[nowIso(),String(e).slice(0,500),runId]);await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=?,next_fetch_at=strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || cadence_minutes || ' minutes')) WHERE id=?`,[nowIso(),`error:${String(e).slice(0,120)}`,nowIso(),source.id]);throw e;}
 }
 
+const ERROR_HINTS=[
+  [/_NOT_CONFIGURED/,'secret_missing','API 키 시크릿이 Worker에 설정되지 않았습니다. `wrangler secret put <KEY_NAME>` 또는 Cloudflare 대시보드 > Settings > Variables and Secrets 에서 등록 후 재배포하세요.'],
+  [/ECOS(?:_ITEM)?:(?:ERROR-100|INFO-100)/,'invalid_api_key','ECOS 인증키가 유효하지 않습니다. 키 값(공백·따옴표 포함 여부)과 ECOS 인증키 발급 상태를 확인하세요.'],
+  [/ECOS(?:_ITEM)?:INFO-200/,'no_data','해당 통계표·항목·기간에 데이터가 없습니다. stat_code / item_code1 / cycle / start_period 를 확인하세요.'],
+  [/ECOS(?:_ITEM)?:ERROR-(?:101|102|200|300|301|400|600)/,'bad_request','ECOS 요청 파라미터가 올바르지 않습니다. 통계표코드·주기(cycle)·기간 형식(M=YYYYMM, D=YYYYMMDD)을 확인하세요.'],
+  [/ECOS(?:_ITEM)?:(?:ERROR-500|ERROR-601|ERROR-602)/,'upstream_error','ECOS 서버 오류 또는 호출 한도 초과입니다. 잠시 후 다시 시도하세요.'],
+  [/ECOS_ITEM_NOT_FOUND/,'item_not_found','StatisticItemList에서 해당 item_code1/cycle 조합을 찾지 못했습니다. ECOS 통계표의 항목코드와 주기를 확인하세요.'],
+  [/NON_JSON_RESPONSE|EMPTY_RESPONSE/,'non_json_response','상대 서버가 JSON이 아닌 응답(HTML/XML/빈 응답)을 반환했습니다. 인증키, 접근 차단 또는 점검 여부를 확인하세요.'],
+  [/FETCH_TIMEOUT/,'timeout','상대 서버 응답이 20초 내에 오지 않았습니다. 잠시 후 다시 시도하세요.'],
+  [/FETCH_FAILED/,'network_error','상대 서버에 연결하지 못했습니다(Cloudflare Worker 외부 호출 실패). 도메인 차단/일시 장애 여부를 확인하세요.'],
+  [/HTTP_(401|403)/,'forbidden','인증 실패 또는 접근 차단입니다. API 키와 서비스 이용 승인 상태를 확인하세요.'],
+  [/HTTP_(429)/,'rate_limited','호출 한도를 초과했습니다. 잠시 후 다시 시도하세요.'],
+  [/HTTP_5\d\d/,'upstream_error','상대 서버 오류입니다. 잠시 후 다시 시도하세요.'],
+  [/OPENFISCAL:/,'openfiscal_error','열린재정 API가 오류를 반환했습니다. 인증키(Key)와 ACNT_YR 설정을 확인하세요.'],
+  [/INVALID_KEY_ENCODING/,'invalid_key_encoding','API 키의 퍼센트 인코딩이 잘못되었습니다. 원본 키 문자열을 그대로 다시 등록하세요.'],
+  [/unknown_connector|connector_test_not_supported/,'unsupported','지원하지 않는 커넥터 테스트입니다.']
+];
+export function explainConnectorError(e){
+  const msg=String(e?.message||e||'unknown_error').replace(/^Error:\s*/,'');
+  const hit=ERROR_HINTS.find(([re])=>re.test(msg));
+  return {error:msg,code:hit?hit[1]:'unexpected_error',hint:hit?hit[2]:'예상하지 못한 오류입니다. 메시지를 확인하고 Cloudflare 로그(wrangler tail)를 참고하세요.'};
+}
+// Never throws: the API route must always answer with JSON so the UI can show the real cause instead of a bare HTTP 500.
+export async function testOfficialConnectorSafe(env,connectorId,config={}){
+  try{return await testOfficialConnector(env,connectorId,config);}
+  catch(e){return {ok:false,connector_id:connectorId,...explainConnectorError(e)};}
+}
+
 export async function testOfficialConnector(env,connectorId,config={}){
   const d=OFFICIAL_CONNECTORS[connectorId];if(!d)throw new Error('unknown_connector');const cfg={...d.default_config,...config};let pack,rows;
   if(connectorId==='bok_ecos'){pack=await collectEcos(env,cfg);rows=pack.rows;}
@@ -119,11 +167,13 @@ export async function officialSourceStatus(env,projectId){
   // Three dashboard reads are independent; batch them to one D1 round-trip.
   const b=await env.DB.batch([
     env.DB.prepare(`SELECT * FROM project_case_layers WHERE project_id=? ORDER BY layer_code`).bind(projectId),
-    env.DB.prepare(`SELECT id,name,connector_id,case_layer,data_role,enabled,last_fetched_at,last_status,last_record_count,config_json,coverage_json,next_fetch_at FROM data_sources WHERE project_id=? AND connector_id IS NOT NULL ORDER BY case_layer,created_at`).bind(projectId)
+    env.DB.prepare(`SELECT id,name,connector_id,case_layer,data_role,enabled,last_fetched_at,last_status,last_record_count,config_json,coverage_json,next_fetch_at FROM data_sources WHERE project_id=? AND connector_id IS NOT NULL ORDER BY case_layer,created_at`).bind(projectId),
+    env.DB.prepare(`SELECT source_id,status,error_text,started_at FROM official_source_sync_runs WHERE project_id=? AND id IN (SELECT id FROM official_source_sync_runs r2 WHERE r2.project_id=official_source_sync_runs.project_id AND r2.source_id=official_source_sync_runs.source_id ORDER BY r2.started_at DESC LIMIT 1)`).bind(projectId)
   ]);
+  const lastRun=new Map(((b[2]?.results)||[]).map(x=>[x.source_id,x]));
   let layers=b[0]?.results||[],sources=b[1]?.results||[];
   const mappings=await getOfficialMappings(env,projectId);
-  return{layers,mappings,sources:sources.map(s=>{const config=safeJson(s.config_json,{}),coverage={rows:Number(s.last_record_count||0),metrics:0,...safeJson(s.coverage_json,{})},d=OFFICIAL_CONNECTORS[s.connector_id];const configMissing=['openfiscal','bojo_openapi'].includes(s.connector_id)&&!config.endpoint_url,secretConfigured=!d?.requires_secret||!!secretValue(env,d?.secret_name);return {...s,config,readiness:configMissing?'CONFIG_REQUIRED':!s.enabled?'DISABLED':!secretConfigured?'SECRET_MISSING':s.last_status||'QUEUED_OR_NOT_FETCHED',requires_secret:!!d?.requires_secret,secret_name:d?.secret_name||null,secret_configured:secretConfigured,coverage};})};
+  return{layers,mappings,sources:sources.map(s=>{const config=safeJson(s.config_json,{}),coverage={rows:Number(s.last_record_count||0),metrics:0,...safeJson(s.coverage_json,{})},d=OFFICIAL_CONNECTORS[s.connector_id];const configMissing=['openfiscal','bojo_openapi'].includes(s.connector_id)&&!config.endpoint_url,secretConfigured=!d?.requires_secret||!!secretValue(env,d?.secret_name);const lr=lastRun.get(s.id),lastError=lr?.status==='error'?explainConnectorError(lr.error_text):null;return {...s,config,last_error:lastError,readiness:configMissing?'CONFIG_REQUIRED':!s.enabled?'DISABLED':!secretConfigured?'SECRET_MISSING':s.last_status||(lastError?`LAST_RUN_ERROR:${lastError.code}`:'QUEUED_OR_NOT_FETCHED'),requires_secret:!!d?.requires_secret,secret_name:d?.secret_name||null,secret_configured:secretConfigured,coverage};})};
 }
 
 // Pure/internal hooks for regression tests; not used by API routing.

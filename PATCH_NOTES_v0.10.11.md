@@ -13,3 +13,19 @@
 - `src/index.js`: test 라우트가 `testOfficialConnectorSafe` 사용 (항상 JSON 응답).
 - `public/app.js`: `ok:false` 응답의 code/hint 표시, `api()`가 비JSON 오류 본문도 읽음, 상태 목록에 최근 오류 표시.
 - `tests/official_sources.test.mjs`: 회귀 테스트 2건 추가.
+
+# v0.10.11 (추가) — FDIC "실패은행 자동 매칭" 503 수정
+
+## 원인
+- `resolveFdicLinks`가 `failures` 전체(최대 2페이지×10,000행, 전 필드)를 받아 JSON 파싱한 뒤,
+  81개 에피소드 × 수천 개 은행을 매번 정규식 정규화로 교차 스코어링(약 31만 쌍, 로컬 측정 CPU 약 1.1초).
+  README 기준 Workers의 짧은 CPU 제한을 넘기면 Worker가 503으로 종료됨.
+- 상대 서버(api.fdic.gov)의 일시적 5xx/429에 재시도·타임아웃이 없었고, 라우트 예외 처리도 없었음.
+
+## 변경 (`src/lib/fdic.js`, `src/index.js`, `public/app.js`)
+- `failures` 요청을 `fields=CERT,NAME,FAILDATE,CITYST`로 축소.
+- 은행명을 1회만 정규화하고 토큰 역색인으로 후보만 스코어링(점수≥0.48은 공유 토큰 없이는 불가능하므로 결과 동일).
+- `fdicRequest`: 25초 타임아웃, 429/5xx/네트워크 오류 최대 3회 재시도(백오프, Retry-After 존중).
+- `explainFdicError`: 오류코드·힌트·retryable. resolve 라우트는 JSON(502/500)으로 응답, enable 라우트는 매칭 실패해도 소스 활성화는 유지.
+- UI: 실패 사유와 힌트 표시.
+- 테스트: `tests/v0111_fdic_resolve_resilience.test.mjs` 4건.

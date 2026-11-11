@@ -3,7 +3,7 @@ const stageOrder=['define','measure','compute','validate','recompute','approved'
 const stageAlias={scientific_review:'approved',complete:'report',report_ready:'report'};
 const stageIdx=s=>Math.max(0,stageOrder.indexOf(stageAlias[s]||s));
 const stageInfo=[['Define','연구 범위 정의','bi-diagram-3'],['Measure','지표 측정·수집','bi-database'],['Compute','CDRS 계산·경계탐색','bi-cpu'],['Validate','강건 검증','bi-shield-check'],['Recompute','인간 보정 재계산','bi-arrow-repeat'],['Approve','최종 승인','bi-person-check']];
-async function api(path,opts={}){const h={'content-type':'application/json','cache-control':'no-cache',...(opts.headers||{})};if(token)h.authorization=`Bearer ${token}`;const r=await fetch(path,{cache:'no-store',...opts,headers:h});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{j={};}if(!r.ok)throw new Error(j.error||(raw&&!raw.trim().startsWith('<')?raw.trim().slice(0,200):'')||`${r.status} ${r.statusText}`);return j;}
+async function api(path,opts={}){const h={'content-type':'application/json','cache-control':'no-cache',...(opts.headers||{})};if(token)h.authorization=`Bearer ${token}`;const r=await fetch(path,{cache:'no-store',...opts,headers:h});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{j={};}if(!r.ok){const err=new Error(j.error||(raw&&!raw.trim().startsWith('<')?raw.trim().slice(0,200):'')||`${r.status} ${r.statusText}`);err.data=j;err.status=r.status;throw err;}return j;}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=(v,d=0)=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:d});
 const fmtTs=v=>{if(!v)return '-';try{return new Date(v).toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}catch{return String(v)}};
@@ -199,11 +199,11 @@ function renderFdicRanking(r){
 
 if(document.getElementById('fdicEnableBtn'))document.getElementById('fdicEnableBtn').onclick=async()=>{
   if(!current)return;const b=document.getElementById('fdicEnableBtn');b.disabled=true;
-  try{const r=await api(`/api/projects/${current}/fdic/enable`,{method:'POST',body:'{}'});toast(`FDIC 활성화 · 소스 ${r.created?.length||0}개 · CERT 자동확정 ${r.links?.confirmed||0}`);await loadFdicStatus();}catch(e){alert(`FDIC 활성화 실패: ${e.message}`)}finally{b.disabled=false}
+  try{const r=await api(`/api/projects/${current}/fdic/enable`,{method:'POST',body:'{}'});if(r.links?.ok===false)alert(`FDIC 소스는 활성화되었지만 자동 매칭은 실패했습니다: ${r.links.error}${r.links.hint?`\n→ ${r.links.hint}\n(‘실패은행 자동 매칭’을 나중에 다시 실행하세요)`:''}`);else toast(`FDIC 활성화 · 소스 ${r.created?.length||0}개 · CERT 자동확정 ${r.links?.confirmed||0}`);await loadFdicStatus();}catch(e){alert(`FDIC 활성화 실패: ${e.message}`)}finally{b.disabled=false}
 };
 if(document.getElementById('fdicResolveBtn'))document.getElementById('fdicResolveBtn').onclick=async()=>{
   if(!current)return;const b=document.getElementById('fdicResolveBtn');b.disabled=true;
-  try{const r=await api(`/api/projects/${current}/fdic/resolve`,{method:'POST',body:JSON.stringify({auto_confirm:true,max_episodes:81})});toast(`FDIC 매칭 · 확정 ${r.confirmed||0} · 검토대기 ${r.pending||0}`);await loadFdicStatus();}catch(e){alert(`FDIC 매칭 실패: ${e.message}`)}finally{b.disabled=false}
+  try{const r=await api(`/api/projects/${current}/fdic/resolve`,{method:'POST',body:JSON.stringify({auto_confirm:true,max_episodes:81})});toast(`FDIC 매칭 · 확정 ${r.confirmed||0} · 검토대기 ${r.pending||0}`);await loadFdicStatus();}catch(e){alert(`FDIC 매칭 실패: ${e.message}${e.data?.hint?`\n→ ${e.data.hint}`:''}`)}finally{b.disabled=false}
 };
 if(document.getElementById('fdicCollectBtn'))document.getElementById('fdicCollectBtn').onclick=async()=>{
   if(!current)return;const b=document.getElementById('fdicCollectBtn');b.disabled=true;

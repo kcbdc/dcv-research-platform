@@ -13,13 +13,39 @@ export function normalizeBankName(s=''){
 }
 
 function tokens(s){ return new Set(normalizeBankName(s).split(' ').filter(x=>x.length>1)); }
-export function bankNameScore(a,b){
-  const A=tokens(a),B=tokens(b); if(!A.size||!B.size)return 0;
-  const inter=[...A].filter(x=>B.has(x)).length, union=new Set([...A,...B]).size;
-  const jac=inter/union;
-  const na=normalizeBankName(a),nb=normalizeBankName(b);
+function scoreNormalized(na,A,nb,B){
+  if(!A.size||!B.size)return 0;
+  let inter=0;for(const x of A)if(B.has(x))inter++;
+  const union=A.size+B.size-inter,jac=inter/union;
   const contain=(na.includes(nb)||nb.includes(na))?1:0;
   return Math.min(1,0.78*jac+0.22*contain);
+}
+export function bankNameScore(a,b){
+  const na=normalizeBankName(a),nb=normalizeBankName(b);
+  return scoreNormalized(na,tokensOf(na),nb,tokensOf(nb));
+}
+function tokensOf(norm){return new Set(norm.split(' ').filter(x=>x.length>1));}
+// Normalise every candidate once and index by token, so each episode only scores banks sharing a token
+// (a score >= 0.48 is impossible without one). Replaces episodes x banks full cross-scoring (~300k regex-heavy calls).
+function buildBankIndex(rows){
+  const entries=[],byToken=new Map();
+  for(const r of rows){
+    const name=pick(r,['NAME','NAMEFULL','name'])||'',norm=normalizeBankName(name),toks=tokensOf(norm);
+    if(!toks.size)continue;
+    const idx=entries.push({r,norm,toks})-1;
+    for(const t of toks){let l=byToken.get(t);if(!l)byToken.set(t,l=[]);l.push(idx);}
+  }
+  return {entries,byToken};
+}
+function matchBanks(index,episodeName,minScore=0.48,top=5){
+  const na=normalizeBankName(episodeName),A=tokensOf(na);if(!A.size)return [];
+  const seen=new Set(),scored=[];
+  for(const t of A)for(const i of index.byToken.get(t)||[]){
+    if(seen.has(i))continue;seen.add(i);
+    const e=index.entries[i],score=scoreNormalized(na,A,e.norm,e.toks);
+    if(score>=minScore)scored.push({r:e.r,score,i});
+  }
+  return scored.sort((x,y)=>y.score-x.score||x.i-y.i).slice(0,top);
 }
 
 export function computeHhi(bankDeposits){
@@ -62,15 +88,38 @@ function headers(env){
   return h;
 }
 
+const RETRYABLE=new Set([408,425,429,500,502,503,504]);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Transient upstream failures (503 etc.) are retried with backoff; the final error is labelled so the UI can explain it.
+async function fdicRequest(env,endpoint,url,{attempts=3,timeoutMs=25000}={}){
+  let last=null;
+  for(let i=0;i<attempts;i++){
+    try{
+      const resp=await fetch(url,{headers:headers(env),signal:AbortSignal.timeout(timeoutMs)});
+      if(resp.ok){
+        try{return await resp.json();}catch{throw new Error(`FDIC_NON_JSON:${endpoint}`);}
+      }
+      const retryAfter=Number(resp.headers?.get?.('retry-after'));
+      last=new Error(`FDIC_HTTP_${resp.status}:${endpoint}`);last.status=resp.status;
+      if(!RETRYABLE.has(resp.status))throw last;
+      if(i<attempts-1)await sleep(Math.min(4000,Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:500*2**i));
+    }catch(e){
+      if(String(e?.message||'').startsWith('FDIC_'))throw e;
+      const name=String(e?.name||'');
+      last=new Error(name==='TimeoutError'||name==='AbortError'?`FDIC_TIMEOUT:${endpoint}`:`FDIC_NETWORK:${endpoint}:${String(e?.message||e).slice(0,100)}`);
+      if(i<attempts-1)await sleep(500*2**i);
+    }
+  }
+  throw last;
+}
+
 async function fdicFetch(env, endpoint, params={}, {maxPages=20}={}){
   let offset=0, out=[], total=null, pages=0;
   do{
     const u=new URL(`${BASE}/${endpoint}`);
     const p={...params,limit:Math.min(PAGE_LIMIT,Number(params.limit||PAGE_LIMIT)),offset,format:'json'};
     for(const [k,v] of Object.entries(p)) if(v!==undefined&&v!==null&&v!=='')u.searchParams.set(k,String(v));
-    const resp=await fetch(u.toString(),{headers:headers(env)});
-    if(!resp.ok) throw new Error(`FDIC ${endpoint} HTTP ${resp.status}`);
-    const j=await resp.json();
+    const j=await fdicRequest(env,endpoint,u.toString());
     const rows=Array.isArray(j?.data)?j.data:[]; out.push(...rows);
     total=Number(j?.meta?.total ?? j?.metadata?.total ?? j?.meta?.total_count ?? rows.length);
     pages++; offset+=rows.length;
@@ -79,15 +128,29 @@ async function fdicFetch(env, endpoint, params={}, {maxPages=20}={}){
   return {rows:out,total:Number.isFinite(total)?total:out.length,pages,truncated:Number.isFinite(total)&&out.length<total};
 }
 
+const FDIC_ERROR_HINTS=[
+  [/FDIC_HTTP_503|FDIC_HTTP_502|FDIC_HTTP_504|FDIC_HTTP_500/,'fdic_upstream_unavailable','FDIC API(api.fdic.gov)가 일시적으로 응답하지 않습니다(자동 재시도 후에도 실패). 잠시 후 다시 시도하세요. 이미 확정된 매칭은 유지됩니다.'],
+  [/FDIC_HTTP_429/,'fdic_rate_limited','FDIC API 호출 한도를 초과했습니다. 잠시 후 다시 시도하거나 FDIC_API_KEY 시크릿을 등록하세요.'],
+  [/FDIC_HTTP_40[13]/,'fdic_forbidden','FDIC API 접근이 거부되었습니다. FDIC_API_KEY 설정을 확인하세요.'],
+  [/FDIC_TIMEOUT/,'fdic_timeout','FDIC API 응답이 지연되었습니다. 잠시 후 다시 시도하세요.'],
+  [/FDIC_NETWORK/,'fdic_network_error','FDIC API에 연결하지 못했습니다. 잠시 후 다시 시도하세요.'],
+  [/FDIC_NON_JSON/,'fdic_non_json','FDIC API가 JSON이 아닌 응답을 반환했습니다. 점검 중일 수 있습니다.']
+];
+export function explainFdicError(e){
+  const msg=String(e?.message||e||'unknown_error').replace(/^Error:\s*/,'');
+  const hit=FDIC_ERROR_HINTS.find(([re])=>re.test(msg));
+  return {error:msg,code:hit?hit[1]:'fdic_unexpected_error',hint:hit?hit[2]:'예상하지 못한 오류입니다. wrangler tail 로그를 확인하세요.',retryable:!!hit&&hit[1]!=='fdic_forbidden'};
+}
+
 export async function resolveFdicLinks(env,projectId,{autoConfirm=true,maxEpisodes=81}={}){
   // One Failure endpoint fetch resolves many failed US episodes without 81 network calls.
   const eps=await all(env.DB,`SELECT e.* FROM empirical_episodes e LEFT JOIN fdic_episode_links l ON l.episode_id=e.id AND l.project_id=e.project_id WHERE e.project_id=? AND (l.id IS NULL OR l.match_status!='confirmed') ORDER BY e.year,e.episode_name LIMIT ?`,[projectId,maxEpisodes]);
   if(!eps.length)return {episodes:0,confirmed:0,pending:0,candidates:0};
-  const failureResp=await fdicFetch(env,'failures',{limit:10000},{maxPages:2});
-  const failures=failureResp.rows.map(unwrap);
+  const failureResp=await fdicFetch(env,'failures',{limit:10000,fields:'CERT,NAME,FAILDATE,CITYST'},{maxPages:2});
+  const failures=failureResp.rows.map(unwrap),bankIndex=buildBankIndex(failures);
   let confirmed=0,pending=0,candidates=0; const linkWrites=[];
   for(const e of eps){
-    const scored=failures.map(r=>({r,score:bankNameScore(e.episode_name,pick(r,['NAME','NAMEFULL','name'])||'')})).filter(x=>x.score>=0.48).sort((a,b)=>b.score-a.score).slice(0,5);
+    const scored=matchBanks(bankIndex,e.episode_name);
     if(!scored.length)continue;
     candidates+=scored.length;
     const best=scored[0], second=scored[1];

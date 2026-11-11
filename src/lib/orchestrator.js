@@ -23,6 +23,19 @@ async function jobExists(env,projectId,type,phase=null){
   return !!r;
 }
 
+// project_cycle_stats 는 파생 캐시다. 캐시가 실제 테이블과 어긋난 것이 확인된 프로젝트·주기만 권위 테이블에서 다시 계산한다.
+async function repairCycleStats(env,projectId,cycle){
+  await run(env.DB,`UPDATE project_cycle_stats SET
+    candidate_total=(SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=?),
+    candidate_pending=(SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending'),
+    candidate_active=(SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=? AND status IN ('pending','unresolved','provisionally_feasible')),
+    candidate_feasible=(SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible'),
+    candidate_infeasible=(SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=? AND status IN ('infeasible','confirmation_failed')),
+    candidate_unresolved=(SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=? AND evidence_status='UNRESOLVED')
+    WHERE project_id=? AND research_cycle=?`,[...Array(6).fill([projectId,cycle]).flat(),projectId,cycle]);
+  await audit(env,projectId,'agent','cycle_stats.repaired','project',projectId,{cycle,reason:'materialized_counter_disagreed_with_authoritative_tables'});
+}
+
 // 모든 자동 단계를 마친 프로젝트 상태. 이 상태에서는 Cron 이 15분마다 advance 를 돌려도 읽을 것이 없다.
 const TERMINAL_STATUSES = new Set(['complete','report_ready']);
 
@@ -111,10 +124,22 @@ export async function advanceProject(env,projectId){
   const rn=Object.fromEntries(runAgg.map(r=>[r.phase,Number(r.n||0)]));
   const recomputeNow=await one(env.DB,`SELECT COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase='recompute' AND r.evidence_revision=?`,[projectId,cycle,rev]);
   rn.recompute=Number(recomputeNow?.n||0);
-  if((rn.historical||0)<feasible || (rn.stress||0)<feasible){
-    if(!(await jobExists(env,projectId,'compute_candidate','historical')) && !(await jobExists(env,projectId,'compute_candidate','stress'))) await enqueueRobustValidation(env,projectId);
-    await setStage(env,p,'validate');
-    return {stage:'robust'};
+  let robustGate=(rn.historical||0)<feasible || (rn.stress||0)<feasible;
+  if(robustGate){
+    let queuedRobust=0;
+    if(!(await jobExists(env,projectId,'compute_candidate','historical')) && !(await jobExists(env,projectId,'compute_candidate','stress'))){
+      queuedRobust=Number((await enqueueRobustValidation(env,projectId))?.queued||0);
+      // enqueueRobustValidation reads the authoritative design_candidates/simulation_runs tables.
+      // If it finds nothing to run while the materialized counter still says work is missing, the
+      // counter is stale (e.g. duplicated legacy triggers double-counted it). Waiting here would
+      // re-enter this branch on every tick forever and never reach validate_project, the
+      // External Validation Matrix or human review, so repair the cache and continue instead.
+      if(!queuedRobust){ await repairCycleStats(env,projectId,cycle); robustGate=false; }
+    }
+    if(robustGate){
+      await setStage(env,p,'validate');
+      return {stage:'robust',queued:queuedRobust};
+    }
   }
 
   const valAgg=await all(env.DB,`SELECT v.validation_type t,v.status s,COUNT(*) c,COUNT(DISTINCT v.candidate_id) d FROM validations v LEFT JOIN design_candidates dc ON dc.id=v.candidate_id WHERE v.project_id=? AND dc.research_cycle=? AND (v.validation_type='robust' OR (v.validation_type='human_recompute' AND v.evidence_revision=?)) GROUP BY v.validation_type,v.status`,[projectId,cycle,rev]);

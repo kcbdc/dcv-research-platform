@@ -1,6 +1,7 @@
 import { all, one, run, audit } from './db.js';
 import { nowIso, uid, safeJson } from './util.js';
 import { refreshOfficialMappings, getOfficialMappings } from './official_mapping.js';
+import { githubRunnerStatus } from './github_dispatch.js';
 
 export const OFFICIAL_CONNECTORS={
   bis_cpmi:{id:'bis_cpmi',name:'BIS CPMI Red Book — Retail Payments',case_layer:'A',data_role:'digital_payments',kind:'official_connector',cadence_minutes:10080,url:'https://stats.bis.org/api/v2',requires_secret:false,default_config:{dataset:'WS_CPMI_CASHLESS',agency:'BIS',version:'1.0',start_period:'2012',series:[
@@ -124,7 +125,7 @@ async function upsertObservations(env,projectId,source,rows){
 export async function collectOfficialSource(env,projectId,source){
   const d=OFFICIAL_CONNECTORS[source.connector_id];if(!d)throw new Error(`unknown_connector:${source.connector_id}`);const cfg=safeJson(source.config_json,d.default_config),runId=uid('sync'),started=nowIso();await run(env.DB,`INSERT INTO official_source_sync_runs(id,project_id,source_id,connector_id,case_layer,started_at,status) VALUES(?,?,?,?,?,?,'running')`,[runId,projectId,source.id,d.id,d.case_layer,started]);
   try{let rows=[],pack=null;if(d.id==='bojo_openapi'&&cfg.endpoint_url?.includes('/T_OPD_PRMSCT_SBBGST')){pack=await collectBojo(env,cfg);rows=pack.rows;}else if(d.id==='bis_cpmi')rows=await collectBis(cfg);else if(d.id==='ecb_supervisory')rows=await collectEcb(cfg);else if(d.id==='bok_ecos'){pack=await collectEcos(env,cfg);rows=pack.rows;}else if(d.id==='openfiscal'){pack=await collectOpenFiscal(env,cfg);rows=pack.rows;}else rows=await collectConfigurable(env,d,cfg);if(!rows.length)throw new Error('NO_DATA_ROWS:check_series_key_and_period');const changed=await upsertObservations(env,projectId,source,rows);const mapping=(d.id==='bis_cpmi'||d.id==='ecb_supervisory')?await refreshOfficialMappings(env,projectId,d.id):{updated:0,mappings:[]};await run(env.DB,`UPDATE official_source_sync_runs SET completed_at=?,status='ok',fetched_rows=?,changed_rows=?,detail_json=? WHERE id=?`,[nowIso(),rows.length,changed,JSON.stringify({connector_id:d.id,connector_meta:pack?.meta||null,mapping_updated:mapping.updated,mappings:mapping.mappings.map(x=>({key:x.mapping_key,status:x.status,period:x.period,value:x.value}))}),runId]);{const ts=nowIso(),periods=rows.map(x=>String(x.period||'')).filter(Boolean).sort(),coverage={rows:rows.length,metrics:new Set(rows.map(x=>x.metric_code)).size,first_period:periods[0]||null,last_period:periods.at(-1)||null};await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status='ok',last_record_count=?,coverage_json=?,next_fetch_at=strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || cadence_minutes || ' minutes')) WHERE id=?`,[ts,rows.length,JSON.stringify(coverage),ts,source.id]);}if(pack?.nextPage)await run(env.DB,`UPDATE data_sources SET config_json=?,last_fetched_at=?,last_status=?,next_fetch_at=? WHERE id=?`,[JSON.stringify({...cfg,sync_page:pack.nextPage}),pack.partial?null:nowIso(),pack.partial?'partial:resume_next_page':'ok',pack.partial?nowIso():null,source.id]);return{inserted:changed,fetched:rows.length,changed,partial:!!pack?.partial,connector_id:d.id,case_layer:d.case_layer,mapping,meta:pack?.meta||null};}
-  catch(e){await run(env.DB,`UPDATE official_source_sync_runs SET completed_at=?,status='error',error_text=? WHERE id=?`,[nowIso(),String(e).slice(0,500),runId]);await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=?,next_fetch_at=strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || cadence_minutes || ' minutes')) WHERE id=?`,[nowIso(),`error:${String(e).slice(0,120)}`,nowIso(),source.id]);throw e;}
+  catch(e){await run(env.DB,`UPDATE official_source_sync_runs SET completed_at=?,status='error',error_text=? WHERE id=?`,[nowIso(),String(e).slice(0,500),runId]);await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=?,next_fetch_at=strftime('%Y-%m-%dT%H:%M:%fZ',datetime(?,'+' || MIN(cadence_minutes,30) || ' minutes')) WHERE id=?`,[nowIso(),`error:${String(e).slice(0,120)}`,nowIso(),source.id]);throw e;}
 }
 
 const ERROR_HINTS=[
@@ -155,6 +156,24 @@ export async function testOfficialConnectorSafe(env,connectorId,config={}){
   catch(e){return {ok:false,connector_id:connectorId,...explainConnectorError(e)};}
 }
 
+// Official connectors are light, I/O-bound HTTP pulls. Running them on the Worker keeps them independent of the
+// GitHub Actions runner (hybrid mode queues `collect_project` for Actions only; when Actions is not dispatched the
+// sources used to sit at QUEUED_OR_NOT_FETCHED forever). `force` ignores next_fetch_at (manual "collect now").
+export async function collectDueOfficialSources(env,{projectId=null,limit=2,force=false,budgetMs=40000}={}){
+  const now=nowIso(),where=["kind='official_connector'",'enabled=1'],binds=[];
+  if(projectId){where.push('project_id=?');binds.push(projectId);}
+  if(!force){where.push("COALESCE(next_fetch_at,'1970-01-01T00:00:00.000Z')<=?");binds.push(now);}
+  const order=force?"COALESCE(last_fetched_at,'') ASC,id":"COALESCE(next_fetch_at,'1970-01-01T00:00:00.000Z'),id";
+  const sources=await all(env.DB,`SELECT * FROM data_sources WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,[...binds,Math.max(1,Math.min(8,Number(limit)||2))]);
+  const attempted=[],t0=Date.now();
+  for(const src of sources){
+    if(attempted.length&&Date.now()-t0>budgetMs){attempted.push({connector_id:src.connector_id,project_id:src.project_id,ok:null,skipped:'time_budget'});continue;}
+    try{const r=await collectOfficialSource(env,src.project_id,src);attempted.push({connector_id:src.connector_id,project_id:src.project_id,ok:true,fetched:r.fetched,inserted:Number(r.inserted||0),partial:!!r.partial});}
+    catch(e){attempted.push({connector_id:src.connector_id,project_id:src.project_id,ok:false,...explainConnectorError(e)});}
+  }
+  return {attempted,processed:attempted.filter(x=>x.ok!==null).length};
+}
+
 export async function testOfficialConnector(env,connectorId,config={}){
   const d=OFFICIAL_CONNECTORS[connectorId];if(!d)throw new Error('unknown_connector');const cfg={...d.default_config,...config};let pack,rows;
   if(connectorId==='bok_ecos'){pack=await collectEcos(env,cfg);rows=pack.rows;}
@@ -173,7 +192,13 @@ export async function officialSourceStatus(env,projectId){
   const lastRun=new Map(((b[2]?.results)||[]).map(x=>[x.source_id,x]));
   let layers=b[0]?.results||[],sources=b[1]?.results||[];
   const mappings=await getOfficialMappings(env,projectId);
-  return{layers,mappings,sources:sources.map(s=>{const config=safeJson(s.config_json,{}),coverage={rows:Number(s.last_record_count||0),metrics:0,...safeJson(s.coverage_json,{})},d=OFFICIAL_CONNECTORS[s.connector_id];const configMissing=['openfiscal','bojo_openapi'].includes(s.connector_id)&&!config.endpoint_url,secretConfigured=!d?.requires_secret||!!secretValue(env,d?.secret_name);const lr=lastRun.get(s.id),lastError=lr?.status==='error'?explainConnectorError(lr.error_text):null;return {...s,config,last_error:lastError,readiness:configMissing?'CONFIG_REQUIRED':!s.enabled?'DISABLED':!secretConfigured?'SECRET_MISSING':s.last_status||(lastError?`LAST_RUN_ERROR:${lastError.code}`:'QUEUED_OR_NOT_FETCHED'),requires_secret:!!d?.requires_secret,secret_name:d?.secret_name||null,secret_configured:secretConfigured,coverage};})};
+  let pipeline=null;
+  try{
+    const q=await env.DB.prepare(`SELECT COUNT(*) n,MIN(created_at) oldest FROM jobs WHERE project_id=? AND type='collect_project' AND status='queued'`).bind(projectId).first();
+    const hybrid=String(env.COMPUTE_EXECUTOR||'')==='hybrid',gh=hybrid?await githubRunnerStatus(env):null;
+    pipeline={executor:env.COMPUTE_EXECUTOR||'cloudflare',collect_jobs_queued:Number(q?.n||0),oldest_queued_at:q?.oldest||null,github_actions_configured:gh?gh.configured:null,github_runner_active:gh?gh.runner_active:null,github_last_completed_at:gh?gh.last_completed_at:null};
+  }catch{pipeline=null;}
+  return{layers,mappings,pipeline,sources:sources.map(s=>{const config=safeJson(s.config_json,{}),coverage={rows:Number(s.last_record_count||0),metrics:0,...safeJson(s.coverage_json,{})},d=OFFICIAL_CONNECTORS[s.connector_id];const configMissing=['openfiscal','bojo_openapi'].includes(s.connector_id)&&!config.endpoint_url,secretConfigured=!d?.requires_secret||!!secretValue(env,d?.secret_name);const lr=lastRun.get(s.id),lastError=lr?.status==='error'?explainConnectorError(lr.error_text):null;return {...s,config,last_error:lastError,readiness:configMissing?'CONFIG_REQUIRED':!s.enabled?'DISABLED':!secretConfigured?'SECRET_MISSING':s.last_status||(lastError?`LAST_RUN_ERROR:${lastError.code}`:'QUEUED_OR_NOT_FETCHED'),requires_secret:!!d?.requires_secret,secret_name:d?.secret_name||null,secret_configured:secretConfigured,coverage};})};
 }
 
 // Pure/internal hooks for regression tests; not used by API routing.

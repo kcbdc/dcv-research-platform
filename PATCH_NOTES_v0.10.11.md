@@ -29,3 +29,19 @@
 - `explainFdicError`: 오류코드·힌트·retryable. resolve 라우트는 JSON(502/500)으로 응답, enable 라우트는 매칭 실패해도 소스 활성화는 유지.
 - UI: 실패 사유와 힌트 표시.
 - 테스트: `tests/v0111_fdic_resolve_resilience.test.mjs` 4건.
+
+# v0.10.11 (추가) — 공식 데이터가 계속 QUEUED_OR_NOT_FETCHED 인 문제
+
+## 원인
+- `COMPUTE_EXECUTOR=hybrid`에서 `collect_project`는 GitHub Actions 전용(github-heavy) 작업. Worker는 가져가지 않음.
+- Worker가 러너를 깨우려면 `GITHUB_ACTIONS_TOKEN` 필요(없으면 `not_configured`), 이후는 GitHub 30분 cron에 의존.
+- 8분 후 Worker 비상 실행(`recoverHybridStall`)이 `EMERGENCY_WORKER_COMPUTE`를 설정하지만 이 플래그를 읽는 코드가 없어 아무것도 실행되지 않음.
+- 수집 실패 시 `next_fetch_at`이 cadence(ECOS 1일, BIS 7일)만큼 밀려 재시도가 막힘.
+
+## 변경
+- `collectDueOfficialSources`: 공식 커넥터를 Worker에서 직접 수집(Actions 불필요). 수동 버튼은 force, cron은 5분마다 due 소스 2개.
+- `POST /official-sources/collect`: 큐 등록과 함께 즉시 수집 후 소스별 결과(오류코드·힌트)를 반환.
+- 수집 실패 시 재시도 간격을 최대 30분으로 단축.
+- `claimJobs`: `EMERGENCY_WORKER_COMPUTE` 반영(collect_project 한정).
+- 상태 응답에 `pipeline`(큐 대기 수, Actions 설정/러너 상태) 추가, UI에 대기 사유 표시.
+- 테스트: `tests/v0111_official_inline_collect.test.mjs` 4건.

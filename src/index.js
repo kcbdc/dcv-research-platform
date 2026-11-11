@@ -15,7 +15,7 @@ import { latestProtocol } from './lib/rigor.js';
 import { registerEvidence, approvalGates } from './lib/evidence.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
 import { explainFdicError, resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
-import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus, testOfficialConnectorSafe } from './lib/official_sources.js';
+import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus, testOfficialConnectorSafe, collectDueOfficialSources } from './lib/official_sources.js';
 import { getValidationMatrix, refreshValidationMatrix } from './lib/validation_matrix.js';
 import {labApi,scheduleLab} from './lib/lab.js';
 import {calibrateConstraintQuantiles,constraintSensitivityCurve} from './lib/constraint_calibration.js';
@@ -52,6 +52,17 @@ export async function recoverHybridStall(env,{reason='self_heal'}={}){
   });
   const results=await processFastLane(fallbackEnv,{rounds:1});
   return {status:'worker_emergency',dispatch,age_seconds:ageSeconds,results,runner:status};
+}
+
+// Runs due official connectors on the Worker and applies the same follow-up as the collect_project handler.
+async function collectOfficialInline(env,{projectId=null,limit=2,force=false}={}){
+  const r=await collectDueOfficialSources(env,{projectId,limit,force});
+  const byProject=new Map();
+  for(const x of r.attempted)if(x.ok&&x.inserted>0)byProject.set(x.project_id,(byProject.get(x.project_id)||0)+x.inserted);
+  for(const [pid,inserted] of byProject){
+    try{await registerEvidence(env,pid,{kind:'EXTERNAL_DATA',source:'official_inline_collector',detail:{inserted}});await enqueueOnce(env,pid,'measure_project',{},30);}catch(_){}
+  }
+  return r;
 }
 
 const tableColumnCache=new Map();
@@ -262,7 +273,7 @@ async function api(request,env,ctx=null){
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
     if(parts[3]==='official-sources' && parts[4]==='status' && method==='GET'){ return json(await officialSourceStatus(env,projectId)); }
     if(parts[3]==='official-sources' && parts[4]==='enable' && method==='POST'){ const b=await bodyJson(request); const ids=Array.isArray(b.connector_ids)?b.connector_ids:[b.connector_id].filter(Boolean); const out=[]; for(const id of ids) out.push({connector_id:id,...await enableOfficialConnector(env,projectId,id,(b.configs||{})[id]||b.config||{})}); await enqueueOnce(env,projectId,'collect_project',{refresh:true,official_enable:true},20,1); return json({enabled:out,status:await officialSourceStatus(env,projectId),collection:'queued'},201); }
-    if(parts[3]==='official-sources' && parts[4]==='collect' && method==='POST'){ await enqueueOnce(env,projectId,'collect_project',{refresh:true,official_manual:true},20,1); return json({status:'queued'}); }
+    if(parts[3]==='official-sources' && parts[4]==='collect' && method==='POST'){ await enqueueOnce(env,projectId,'collect_project',{refresh:true,official_manual:true},20,1); let inline=null; try{inline=await collectOfficialInline(env,{projectId,limit:5,force:true});}catch(e){inline={attempted:[],error:String(e?.message||e)};} return json({status:'collected',queued:true,inline,status_after:await officialSourceStatus(env,projectId)}); }
     if(parts[3]==='official-sources' && parts[4]==='test' && method==='POST'){ const b=await bodyJson(request); return json(await testOfficialConnectorSafe(env,b.connector_id,b.config||{})); }
     if(parts[3]==='fdic' && parts[4]==='status' && method==='GET'){ return json(await fdicStatus(env,projectId)); }
     if(parts[3]==='fdic' && parts[4]==='enable' && method==='POST'){ const enabled=await enableFdicConnectors(env,projectId); let links;try{links=await resolveFdicLinks(env,projectId,{autoConfirm:true,maxEpisodes:81});}catch(e){links={ok:false,...explainFdicError(e)};} await enqueueOnce(env,projectId,'collect_project',{refresh:true,fdic_manual:true},20,1); return json({status:'enabled',...enabled,links}); }
@@ -406,7 +417,7 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env,ctx);
     return env.ASSETS.fetch(request);
   },
-  async scheduled(controller,env,ctx){ ctx.waitUntil((async()=>{ await scheduleAll(env,{process:false}); await processFastLane(env,{rounds:3}); await recoverHybridStall(env,{reason:'worker_cron'}); await scheduleLab(env); })()); },
+  async scheduled(controller,env,ctx){ ctx.waitUntil((async()=>{ await scheduleAll(env,{process:false}); await processFastLane(env,{rounds:3}); await recoverHybridStall(env,{reason:'worker_cron'}); await scheduleLab(env); if(new Date(controller.scheduledTime||Date.now()).getUTCMinutes()%5===0)await collectOfficialInline(env,{limit:2}).catch(()=>null); })()); },
   async queue(batch,env,ctx){
     for(const message of batch.messages){
       try{ const out=await processJobs(env); if(!out.length&&String(env.COMPUTE_EXECUTOR||'')==='hybrid')await recoverHybridStall(env,{reason:'queue_wake'}); message.ack(); }

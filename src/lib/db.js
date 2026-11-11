@@ -110,7 +110,10 @@ export async function claimJobs(env, limit=4) {
   await recoverStaleJobs(env);
   const lane=runtimeLane(env); if(lane==='none')return [];
   const remaining=env.EXTERNAL_RUNTIME==='github-actions'&&typeof env.DB.remaining==='number'?env.DB.remaining:1000000;
-  const laneSql=laneSqlFor(lane);
+  let laneSql=laneSqlFor(lane);
+  // recoverHybridStall() sets EMERGENCY_WORKER_COMPUTE when GitHub Actions never picked up queued work. The flag was
+  // previously ignored, so the fallback claimed nothing. Light I/O-bound collectors may now run on the Worker.
+  if(lane==='worker-hybrid'&&env.EMERGENCY_WORKER_COMPUTE==='1')laneSql=laneSql.replace(/ AND type IN \((.*)\)$/,` AND (type IN ($1) OR type='collect_project')`);
   // An oversized collector must not block smaller compute jobs behind it. In hybrid mode,
   // the same indexed queue is partitioned by job type so Worker and Actions never steal each other's work.
   const laneOrder=lane==='github-hybrid'

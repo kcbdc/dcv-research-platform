@@ -65,7 +65,7 @@ async function inferLabTask(env,c,t,snapshot,inputs){
   previous_reviews:inputs.reviews.map(r=>({role:r.role_id,summary:r.summary,blockers:safeJson(r.output_json).blockers||[]})),
   previous_section:(inputs.documents.find(d=>d.section===section)?.markdown||'').slice(0,10000),
   manuscript_for_review:role.id==='writer'?undefined:inputs.documents.filter(d=>MANUSCRIPT_SECTIONS.includes(d.section)).map(d=>({section:d.section,markdown:d.markdown.slice(0,1800),signature:d.evidence_signature})),
-  instructions:role.id==='writer'?`Write a complete 550–900 word ${section} section (abstract 180–250 words). Revise rather than append. Use explicit limitations. Subsequent passes must address prior reviews. Do not duplicate the section heading.`:
+  instructions:role.id==='writer'?`Write a complete 550–900 word ${section} section (abstract 180–250 words). Revise rather than append. Use explicit limitations. Subsequent passes must address prior reviews. Do not duplicate the section heading. Always put the full section text in the "markdown" field, even when evidence is incomplete: write only what the supplied evidence supports and state each gap as an explicit limitation inside the text. Never return empty or placeholder markdown.`:
    role.id==='leader'?'Issue an internal editorial decision and actionable blockers. From day 20 onward also draft the four submission documents, with 3–5 highlights of at most 85 characters each. Never invent ethics approval, funding or exclusive-submission declarations.':'Return an evidence-specific critique and concrete improvements.'};
  const model=env.LAB_AI_MODEL||'@cf/meta/llama-3.3-70b-instruct-fp8-fast';
  inputsCompact.references=inputsCompact.references.slice(0,60).map(r=>({...r,abstract:r.abstract?.slice(0,400)}));

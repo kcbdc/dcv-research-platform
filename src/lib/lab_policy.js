@@ -65,7 +65,9 @@ export function validateLabOutput(output,role,sources){
   const doi=m[0].replace(/[).,;]+$/,'').toLowerCase();
   if(!allowed.has(doi)&&!allowed.has(m[0].toLowerCase()))throw new Error('Unknown DOI in AI output');
  }
- if(role.id==='writer'&&(typeof output.markdown!=='string'||output.markdown.split(/\s+/).length<80))throw new Error('Writer section is incomplete');
+ if(role.id==='writer'&&typeof output.markdown!=='string')for(const k of ['section_markdown','section','text','content','manuscript','body'])if(typeof output[k]==='string'){output.markdown=output[k];break;}
+ if(role.id==='writer'){const words=typeof output.markdown==='string'?output.markdown.split(/\s+/).filter(Boolean).length:0;
+  if(words<80)throw new Error(`Writer section is incomplete: ${words} words (need 80+); keys=${Object.keys(output).join(',')}; blockers=${Array.isArray(output.blockers)?output.blockers.length:0}; summary=${String(output.summary||'').slice(0,160)}`);}
  if(role.id==='writer'&&/[가-힣]/.test(output.markdown))throw new Error('Manuscript sections must be English');
  return {summary:output.summary.slice(0,1800),findings:Array.isArray(output.findings)?output.findings.slice(0,12):[],
   blockers:Array.isArray(output.blockers)?output.blockers.slice(0,12).map(String):[],recommendations:Array.isArray(output.recommendations)?output.recommendations.slice(0,12).map(String):[],

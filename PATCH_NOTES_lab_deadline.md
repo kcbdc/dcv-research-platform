@@ -26,3 +26,8 @@
 ## 추가 (Unverified DOI cited)
 - 모델이 검증 목록(lab_sources)에 없는 DOI를 인용하면 작업 전체를 실패시키던 동작을 변경: 모든 문자열 필드에서 해당 인용을 제거하고 blockers 에 "Unverified DOI cited by the model was removed: …"(DOI 는 `[/]` 로 무해화) 로 기록. 미검증 DOI 는 문서에 남지 않음.
 - 'Writer section is incomplete'(markdown 80단어 미만) 검증은 그대로 유지.
+
+## 추가 (Writer section is incomplete)
+- 검증 오류에 단어 수·응답 키·blocker 수·summary 를 포함(원인 진단용).
+- markdown 대신 section/text/content 등 다른 키로 온 본문도 수용.
+- 프롬프트: 근거가 부족해도 markdown 필드를 비우지 말고, 지원되는 내용만 쓰고 공백은 한계로 명시하도록 지시.

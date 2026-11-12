@@ -167,7 +167,8 @@ async function completeTaskFailure(env,c,t,token,message){
 }
 
 export async function scheduleLab(env){
- if(['github-actions','hybrid'].includes(env.COMPUTE_EXECUTOR)&&env.EXTERNAL_RUNTIME!=='github-actions')return {status:'waiting_for_github_actions'};
+ // Opt-in: LAB_RUN_ON_WORKER=true lets the Worker cron run lab tasks itself when the GitHub Actions runner is not driving them.
+ if(['github-actions','hybrid'].includes(env.COMPUTE_EXECUTOR)&&env.EXTERNAL_RUNTIME!=='github-actions'&&env.LAB_RUN_ON_WORKER!=='true')return {status:'waiting_for_github_actions'};
  // Missing migration must not break the pre-existing DCV pipeline.
  try{
   if(env.LAB_AUTO_START==='true'&&Date.now()<Date.parse(env.LAB_DEADLINE_AT||DEFAULT_DEADLINE)){

@@ -15,3 +15,7 @@
 1. Cloudflare 변수 `LAB_DEADLINE_AT` 이 설정돼 있으면 `2026-11-30T14:59:59.000Z` 로 변경(또는 삭제).
 2. 배포 후 위 API를 프로젝트 ID로 한 번 호출.
 3. `COMPUTE_EXECUTOR` 가 hybrid/github-actions 이면 scheduleLab 은 `EXTERNAL_RUNTIME=github-actions` 일 때만 동작 → Actions 러너가 실제로 도는지 확인.
+
+## 추가 (hybrid 모드에서 연구실이 안 도는 문제)
+- 원인: wrangler.jsonc 의 COMPUTE_EXECUTOR=hybrid 이고 EXTERNAL_RUNTIME 이 없어서, Worker 크론의 scheduleLab() 이 매분 `waiting_for_github_actions` 만 반환하고 종료.
+- `LAB_RUN_ON_WORKER=true` 이면 Worker 크론이 직접 연구실 작업을 실행(opt-in). wrangler.jsonc 에 설정 추가, LAB_DEADLINE_AT 을 2026-11-30T14:59:59Z 로 변경.

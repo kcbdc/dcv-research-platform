@@ -29,6 +29,7 @@
     "MAX_JOBS_PER_TICK": "3",
     "LAB_AUTO_START": "true",
     "LAB_DEADLINE_AT": "2026-11-30T14:59:59.000Z",
+    "LAB_RUN_ON_WORKER": "true",
     "LAB_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "SIM_BATCH_SIZE": "180",
     "COMPUTE_EXECUTOR": "hybrid",

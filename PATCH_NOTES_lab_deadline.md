@@ -22,3 +22,7 @@
 
 ## 추가 (lab_ai_timeout)
 - 자료작성자(writer)/리더는 max_tokens 4500 의 70B 생성이라 45초 타임아웃에 걸림 → 기본 120초(그 외 60초), `LAB_AI_TIMEOUT_MS` 로 조정(30~150초). 임대(lease) 시간 180s→240s.
+
+## 추가 (Unverified DOI cited)
+- 모델이 검증 목록(lab_sources)에 없는 DOI를 인용하면 작업 전체를 실패시키던 동작을 변경: 모든 문자열 필드에서 해당 인용을 제거하고 blockers 에 "Unverified DOI cited by the model was removed: …"(DOI 는 `[/]` 로 무해화) 로 기록. 미검증 DOI 는 문서에 남지 않음.
+- 'Writer section is incomplete'(markdown 80단어 미만) 검증은 그대로 유지.

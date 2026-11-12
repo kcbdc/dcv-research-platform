@@ -42,8 +42,20 @@ export function journalAssessment(rows,years,target=''){
  for(const c of candidates)c.eligible=c.years.every(y=>y.pass);
  return {rule:'Each of the latest three configured metric years: SCIE/SSCI and (Q1/Q2 or AIS >= 0.75)',candidates,eligible:candidates.some(c=>c.eligible)};
 }
+export function stripUnverifiedDois(value,allowed){
+ const removed=new Set();
+ const clean=str=>str
+  .replace(/\[SRC:([^\]]+)\]/g,(m,d)=>allowed.has(String(d).trim().toLowerCase())?m:(removed.add(String(d).trim()),''))
+  .replace(/10\.\d{4,9}\/[A-Za-z0-9._;()/:+-]+/g,m=>{const d=m.replace(/[).,;]+$/,'').toLowerCase();return allowed.has(d)||allowed.has(m.toLowerCase())?m:(removed.add(m.replace(/[).,;]+$/,'')),'[unverified DOI removed]');});
+ const walk=v=>{if(Array.isArray(v)){for(let i=0;i<v.length;i++){if(typeof v[i]==='string')v[i]=clean(v[i]);else walk(v[i]);}}else if(v&&typeof v==='object'){for(const k of Object.keys(v)){if(typeof v[k]==='string')v[k]=clean(v[k]);else walk(v[k]);}}};
+ walk(value);return [...removed].slice(0,20);
+}
 export function validateLabOutput(output,role,sources){
  if(!output||typeof output.summary!=='string'||!output.summary.trim())throw new Error('AI output missing summary');
+ // Models sometimes cite a DOI that was not in the verified source list. Failing the whole task wastes a day of work, so the
+ // unverified citation is stripped from every string field and reported as a blocker instead; unverified DOIs never reach documents.
+ const removed=stripUnverifiedDois(output,new Set(sources.map(s=>s.doi.toLowerCase())));
+ if(removed.length){output.blockers=[...(Array.isArray(output.blockers)?output.blockers:[]),...removed.map(d=>'Unverified DOI cited by the model was removed: '+d.replace('/','[/]'))];}
  const serialized=JSON.stringify(output);
  if(serialized.length>24000)throw new Error('AI output exceeds bounded task size');
  if(/[가-힣]/.test(output.summary))throw new Error('Research output must be English');

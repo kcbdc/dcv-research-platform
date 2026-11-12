@@ -10,6 +10,21 @@ const MAX_ATTEMPTS=3,LEASE_MS=180000;
 const safeConfig=campaign=>safeJson(campaign.config_json);
 const nextTime=(c,cursor)=>new Date(Date.parse(c.starts_at)+(Date.parse(c.deadline_at)-900000-Date.parse(c.starts_at))*cursor/c.total_tasks).toISOString();
 async function writeBatches(db,statements){for(let i=0;i<statements.length;i+=40)await db.batch(statements.slice(i,i+40));}
+// Extend the deadline and wake a stalled/paused/attention/completed(unfinished) campaign.
+// Remaining tasks are re-paced evenly from now to the new deadline: nextTime() maps cursor onto [starts_at, deadline-15min],
+// so starts_at is solved such that the current cursor lands exactly on "now" (otherwise every missed slot would be due at once).
+export async function extendLabDeadline(env,c,input={}){
+ const deadline=new Date(input.deadline_at||'');
+ if(!Number.isFinite(+deadline)||+deadline<=Date.now()+3600000)throw new Error('Deadline must be a valid date at least one hour in the future');
+ if(c.cursor>=c.total_tasks)throw new Error('All tasks are already finished; use rebuild to regenerate the package');
+ const now=Date.now(),end=+deadline-900000,startsAt=new Date((now*c.total_tasks-end*c.cursor)/(c.total_tasks-c.cursor)).toISOString(),ts=nowIso();
+ await env.DB.batch([
+  env.DB.prepare(`UPDATE lab_campaigns SET deadline_at=?,starts_at=?,status='active',error_count=0,last_error=NULL,lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=? WHERE id=?`).bind(deadline.toISOString(),startsAt,ts,ts,c.id),
+  env.DB.prepare(`UPDATE lab_tasks SET status='retry' WHERE campaign_id=? AND seq=? AND status='running'`).bind(c.id,c.cursor)
+ ]);
+ bust(env,c.project_id,'lab:status');
+ return {ok:true,deadline_at:deadline.toISOString(),previous_status:c.status,previous_deadline_at:c.deadline_at,cursor:c.cursor,remaining_tasks:c.total_tasks-c.cursor,next_run_at:ts};
+}
 export async function createLabCampaign(env,projectId,input={}){
  const p=await one(env.DB,'SELECT id,name FROM projects WHERE id=?',[projectId]);if(!p)throw new Error('project_not_found');
  const existing=await one(env.DB,'SELECT id FROM lab_campaigns WHERE project_id=?',[projectId]);if(existing)return {id:existing.id,existing:true};
@@ -125,6 +140,16 @@ export async function processLabTick(env){
    ]);
    bust(env,c.project_id,'lab:status');return {status:'foundation_hold',error:message};
   }
+  // Workers AI quota/capacity errors (429, 3040, daily allocation) are transient: retry in 30 min without consuming an attempt
+  // and without escalating to `attention`, which previously froze the lab permanently after four 429s.
+  if(/\b429\b|rate.?limit|too many requests|capacity temporarily exceeded|\b3040\b|daily free allocation|\b4006\b|quota/i.test(message)){
+   const retryAt=new Date(Date.now()+1800000).toISOString();
+   await env.DB.batch([
+    env.DB.prepare(`UPDATE lab_tasks SET status='retry',attempts=MAX(attempts-1,0),error=? WHERE campaign_id=? AND seq=? AND status='running' AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=?)`).bind(message,c.id,c.cursor,c.id,token),
+    env.DB.prepare(`UPDATE lab_campaigns SET status='active',next_run_at=?,last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?`).bind(retryAt,message,nowIso(),c.id,token)
+   ]);
+   bust(env,c.project_id,'lab:status');return {status:'rate_limited',error:message};
+  }
   if(t&&t.attempts>=MAX_ATTEMPTS)await completeTaskFailure(env,c,t,token,message);
   else await env.DB.batch([
    env.DB.prepare(`UPDATE lab_tasks SET status='retry',error=? WHERE campaign_id=? AND seq=? AND status='running' AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=?)`).bind(message,c.id,c.cursor,c.id,token),
@@ -183,6 +208,7 @@ export async function labApi(request,env,projectId,parts){
  }catch(e){if(/no such table/.test(String(e)))return json({error:'lab_migration_required',migration:'0017_research_lab.sql'},503);throw e;}}
  if(method==='POST'&&!action)return json(await createLabCampaign(env,projectId,await request.json()),201);
  const c=await one(env.DB,'SELECT * FROM lab_campaigns WHERE project_id=?',[projectId]);if(!c)return json({error:'lab_not_started'},404);
+ if(['POST','PUT'].includes(method)&&action==='deadline')return json(await extendLabDeadline(env,c,await request.json()));
  if(method==='POST'&&['pause','resume'].includes(action)){
   if(c.status==='completed'&&action==='resume')return json({error:'campaign_completed'},409);
   await run(env.DB,'UPDATE lab_campaigns SET status=?,lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=? WHERE id=?',[action==='pause'?'paused':'active',nowIso(),nowIso(),c.id]);bust(env,projectId,'lab:status');return json({ok:true});

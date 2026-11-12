@@ -11,7 +11,7 @@ export const LAB_ROLES = [
  {id:'leader',name:'리더',title:'Principal investigator agent',group:'leader',mission:'Make the final internal editorial recommendation, reconcile reviews, prioritize real blockers and prepare submission documents. Never claim journal acceptance.'}
 ];
 export const MANUSCRIPT_SECTIONS=['abstract','introduction','related_work','methods','results','discussion','conclusion'];
-export const DEFAULT_DEADLINE='2026-10-30T14:59:59.000Z'; // October 30 23:59:59 Asia/Seoul
+export const DEFAULT_DEADLINE='2026-11-30T14:59:59.000Z'; // November 30 23:59:59 Asia/Seoul
 export const DEFAULT_YEARS=[2023,2024,2025]; // JCR metric years, not release years
 export function labPhase(day){return day<=4?'protocol_and_gap':day<=10?'evidence_collection':day<=17?'analysis_and_validation':day<=23?'manuscript_revision':day<=27?'independent_review':'submission_packaging';}
 export function writingSection(day){return MANUSCRIPT_SECTIONS[(day-1)%MANUSCRIPT_SECTIONS.length];}

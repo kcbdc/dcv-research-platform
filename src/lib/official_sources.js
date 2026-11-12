@@ -31,6 +31,16 @@ function sdmxPeriod(row){return String(pick(row,['TIME_PERIOD','TIME','time_peri
 function sdmxValue(row){return num(pick(row,['OBS_VALUE','value','Value','DATA_VALUE']));}
 function sdmxUnit(row,hint=''){return String(pick(row,['UNIT_MEASURE','UNIT','UNIT_NAME','unit'])||hint||'');}
 
+// data.go.kr gateway errors ({OpenAPI_ServiceResponse:{cmmMsgHeader:{errMsg,returnAuthMsg,returnReasonCode}}} as JSON or XML) -> compact label that survives truncation.
+function dataGoKrError(text,host){
+  if(!/(^|\.)data\.go\.kr$/.test(String(host||'')))return null;
+  const t=String(text||'');let msg='',code='',auth='';
+  try{const h=JSON.parse(t)?.OpenAPI_ServiceResponse?.cmmMsgHeader;if(h){msg=h.errMsg||'';code=h.returnReasonCode||'';auth=h.returnAuthMsg||'';}}catch{}
+  if(!msg&&!code){msg=xmlTag(t,'errMsg');code=xmlTag(t,'returnReasonCode');auth=xmlTag(t,'returnAuthMsg');}
+  if(!msg&&!code)return null;
+  return `DATAGO[${msg||'?'}/${code||'?'}]:${auth||''}`.slice(0,160);
+}
+
 async function responseText(url,opts={}){
   const {timeoutMs=20000,retries=0,...fopts}=opts;
   const host=(()=>{try{return new URL(url).hostname;}catch{return 'unknown_host';}})();
@@ -40,7 +50,7 @@ async function responseText(url,opts={}){
     try{
       const r=await fetch(url,{...fopts,headers:{'User-Agent':'dcv-research-platform/0.10','Accept':'application/json, text/csv, application/xml, */*',...(fopts.headers||{})},signal:fopts.signal||AbortSignal.timeout(timeoutMs)});
       const text=await r.text();
-      if(!r.ok){const e=new Error(`HTTP_${r.status}:${host}:${text.replace(/\s+/g,' ').slice(0,120)}`);e.noRetry=r.status<500&&r.status!==429&&r.status!==408;throw e;}
+      if(!r.ok){const dg=dataGoKrError(text,host);const e=new Error(`HTTP_${r.status}:${host}:${dg||text.replace(/\s+/g,' ').slice(0,120)}`);e.noRetry=r.status<500&&r.status!==429&&r.status!==408;throw e;}
       return {text,ct:r.headers.get('content-type')||'',status:r.status};
     }catch(e){
       if(String(e?.message||'').startsWith('HTTP_')){last=e;if(e.noRetry)throw e;}
@@ -87,10 +97,8 @@ function xmlDecode(s=''){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'
 function xmlTag(block,tag){const m=String(block).match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,'i'));return m?xmlDecode(m[1].trim()):'';}
 function parseOpenFiscalXml(text){const root=String(text);const code=xmlTag(root,'CODE'),message=xmlTag(root,'MESSAGE'),total=Number(xmlTag(root,'list_total_count')||0);const rows=[...root.matchAll(/<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/gi)].map(m=>({ACNT_YR:xmlTag(m[1],'ACNT_YR'),BDG_FND_DIV_NM:xmlTag(m[1],'BDG_FND_DIV_NM'),ACNT_DIV_NM:xmlTag(m[1],'ACNT_DIV_NM'),SMOK_DIV_NM:xmlTag(m[1],'SMOK_DIV_NM'),SUM_NASS_TREV_BDG_AMT:xmlTag(m[1],'SUM_NASS_TREV_BDG_AMT')}));return {code,message,total,rows};}
 function openFiscalUrl(key,cfg,year,page=1){const u=new URL(cfg.endpoint_url||'https://openapi.openfiscaldata.go.kr/OPFI156');u.searchParams.set(cfg.auth_query_name||'Key',key);u.searchParams.set('Type',cfg.response_type||'xml');u.searchParams.set('pIndex',String(page));u.searchParams.set('pSize',String(Math.min(1000,Number(cfg.page_size||1000))));u.searchParams.set('ACNT_YR',String(year));return u.toString();}
-const FISCAL_FETCH={timeoutMs:45000,retries:2};
-const BOJO_FETCH={timeoutMs:45000,retries:2};
 async function collectOpenFiscal(env,cfg){const key=secretValue(env,'OPENFISCAL_API_KEY');if(!key)throw new Error('OPENFISCAL_API_KEY_NOT_CONFIGURED');const nowY=new Date().getUTCFullYear(),years=cfg.account_year&&cfg.account_year!=='latest'?[Number(cfg.account_year)]:[nowY,nowY-1,nowY-2];let selected=null,meta=null;
-  for(const y of years){const first=await responseText(openFiscalUrl(key,cfg,y,1),FISCAL_FETCH);const parsed=parseOpenFiscalXml(first.text);if(parsed.code&&parsed.code!=='INFO-000'){if(parsed.code==='INFO-200'||/해당하는 데이터가 없습니다/.test(parsed.message))continue;throw new Error(`OPENFISCAL:${parsed.code}:${parsed.message}`);}if(!parsed.rows.length)continue;let rows=[...parsed.rows],page=1,size=Math.min(1000,Number(cfg.page_size||1000));while(rows.length<parsed.total){page++;if(page>100)throw new Error('OPENFISCAL_PAGINATION_LIMIT');const nxt=parseOpenFiscalXml((await responseText(openFiscalUrl(key,cfg,y,page),FISCAL_FETCH)).text);if(nxt.code&&nxt.code!=='INFO-000')throw new Error(`OPENFISCAL:${nxt.code}:${nxt.message}`);if(!nxt.rows.length)break;rows.push(...nxt.rows);if(nxt.rows.length<size&&rows.length>=nxt.total)break;}selected=rows;meta={code:parsed.code||'INFO-000',message:parsed.message||'정상 처리되었습니다.',total:parsed.total||rows.length,year:String(y),pages:page};break;}
+  for(const y of years){const first=await responseText(openFiscalUrl(key,cfg,y,1));const parsed=parseOpenFiscalXml(first.text);if(parsed.code&&parsed.code!=='INFO-000'){if(parsed.code==='INFO-200'||/해당하는 데이터가 없습니다/.test(parsed.message))continue;throw new Error(`OPENFISCAL:${parsed.code}:${parsed.message}`);}if(!parsed.rows.length)continue;let rows=[...parsed.rows],page=1,size=Math.min(1000,Number(cfg.page_size||1000));while(rows.length<parsed.total){page++;if(page>100)throw new Error('OPENFISCAL_PAGINATION_LIMIT');const nxt=parseOpenFiscalXml((await responseText(openFiscalUrl(key,cfg,y,page))).text);if(nxt.code&&nxt.code!=='INFO-000')throw new Error(`OPENFISCAL:${nxt.code}:${nxt.message}`);if(!nxt.rows.length)break;rows.push(...nxt.rows);if(nxt.rows.length<size&&rows.length>=nxt.total)break;}selected=rows;meta={code:parsed.code||'INFO-000',message:parsed.message||'정상 처리되었습니다.',total:parsed.total||rows.length,year:String(y),pages:page};break;}
   if(!selected)throw new Error('OPENFISCAL:NO_DATA_FOR_LATEST_YEARS');const fields=cfg.series_key_fields||['BDG_FND_DIV_NM','ACNT_DIV_NM','SMOK_DIV_NM'];const rows=selected.map(r=>{const period=String(r.ACNT_YR||''),v=num(r.SUM_NASS_TREV_BDG_AMT);return {jurisdiction:cfg.jurisdiction||'KR',metric_code:cfg.metric_code||'openfiscal.revenue.structure',series_key:['OPFI156',...fields.map(k=>r[k]||'-')].join(':'),period,value_num:v,unit:cfg.unit||'source_reported',dimensions:r,payload:r};}).filter(x=>x.period&&x.value_num!=null);return {rows,meta:{...meta,fetched:rows.length}};}
 function secretValue(env,name){let value=name?env[name]:null;if(!value)return value;value=String(value).trim().replace(/^["']|["']$/g,'').trim();if(!value)return null;try{return /%[0-9a-f]{2}/i.test(value)?decodeURIComponent(value):value;}catch{throw new Error('INVALID_KEY_ENCODING');}}
 
@@ -98,8 +106,8 @@ async function collectBojo(env,cfg){
   const key=secretValue(env,'BOJO_API_KEY');if(!key)throw new Error('BOJO_API_KEY_NOT_CONFIGURED');
   const u=new URL(cfg.endpoint_url);for(const [k,v] of Object.entries(cfg.query||{}))if(!u.searchParams.has(k))u.searchParams.set(k,String(v));
   u.searchParams.set('resultType','json');u.searchParams.set('serviceKey',key);const page=Number(cfg.sync_page||u.searchParams.get('pageNo')||1);u.searchParams.set('pageNo',String(page));
-  const {text}=await responseText(u.toString(),BOJO_FETCH);if(text.trim().startsWith('<'))throw new Error('BOJO_XML_RESPONSE:check_key_and_JSON_access');
-  const data=JSON.parse(text),response=data.response||data,code=response.header?.resultCode??data.resultCode;
+  const {text}=await responseText(u.toString(),{timeoutMs:25000,retries:2});const dg=dataGoKrError(text,u.hostname);if(dg)throw new Error('BOJO_API_ERROR:'+dg);if(text.trim().startsWith('<'))throw new Error('BOJO_XML_RESPONSE:check_key_and_JSON_access');
+  const data=parseJsonBody(text,'BOJO'),response=data.response||data,code=response.header?.resultCode??data.resultCode;
   if(code!=null&&!['00','0','0000'].includes(String(code)))throw new Error('BOJO_API_ERROR:'+String(code));
   const body=response.body||response;let list=pathGet(data,cfg.rows_path);if(list==null)list=body.items?.item||body.items;
   if(list==null)throw new Error('BOJO_RESPONSE_SCHEMA_MISMATCH');list=Array.isArray(list)?list:[list];
@@ -153,7 +161,13 @@ const ERROR_HINTS=[
   [/FETCH_TIMEOUT:data-api\.ecb\.europa\.eu/,'timeout_ecb','ECB 서버가 재시도 후에도 응답하지 않았습니다. ECB 데이터 API가 느리거나 Cloudflare Worker의 접속을 지연시키는 경우입니다. 브라우저에서 아래 URL이 바로 열리는지 확인하세요: https://data-api.ecb.europa.eu/service/data/SUP/Q.B01.W0._Z.I3017._T.SII._Z._Z._Z.PCT.C?format=csvdata&startPeriod=2015-Q1 — 열린다면 Worker 접속 차단이므로 GitHub Actions 러너로 수집하세요(Actions 탭 → Run workflow). 이 소스는 30분 뒤 자동 재시도됩니다.'],
   [/FETCH_TIMEOUT/,'timeout','상대 서버 응답이 제한 시간(재시도 포함) 내에 오지 않았습니다. 잠시 후 다시 시도하세요.'],
   [/FETCH_FAILED/,'network_error','상대 서버에 연결하지 못했습니다(Cloudflare Worker 외부 호출 실패). 도메인 차단/일시 장애 여부를 확인하세요.'],
-  [/HTTP_522/,'upstream_522','공공데이터포털/API 제공기관 앞단에서 연결 시간 초과(522)가 발생했습니다. 인증키 오류와는 다른 서버 측 일시 장애일 가능성이 높습니다. 45초 제한으로 최대 3회 재시도하며, 지속되면 제공기관 상태 확인 후 GitHub Actions 러너에서 재수집하세요.'],
+  [/DATAGO\[APPLICATION_ERROR/,'datago_application_error','공공데이터포털 게이트웨이/기관 API 내부 오류(코드 01)입니다. 요청 형식은 명세와 일치하므로 상대 서버의 일시 장애일 가능성이 큽니다. 자동으로 3회 재시도했고 30분 뒤 이어서 다시 수집합니다. 반복되면 같은 조회를 bsnsyear=2021 등 다른 연도로 테스트해 연도별 문제인지 확인하고, 계속되면 활용지원센터(1566-0025, opendata_help@nia.or.kr)에 문의하세요.'],
+  [/DATAGO\[SERVICETIMEOUT_ERROR/,'datago_timeout','기관 API 응답 시간이 초과되었습니다(코드 05). 잠시 후 자동 재시도됩니다.'],
+  [/DATAGO\[INVALID_REQUEST_PARAMETER_ERROR/,'datago_bad_param','요청 파라미터가 올바르지 않습니다(코드 10). bsnsyear(사업연도 4자리), numOfRows, pageNo, resultType=json 설정을 확인하세요.'],
+  [/DATAGO\[(?:SERVICE_KEY_IS_NOT_REGISTERED_ERROR|SERVICE_KEY_IS_NULL)/,'datago_key_invalid','등록되지 않았거나 비어 있는 인증키입니다(코드 30/20). 공공데이터포털의 일반 인증키(Decoding)를 BOJO_API_KEY로 다시 등록하고, 해당 API(국고보조금 정보)의 활용신청 승인 여부를 확인하세요.'],
+  [/DATAGO\[(?:SERVICE_ACCESS_DENIED_ERROR|PERMISSION_DENIED)/,'datago_access_denied','이 API에 대한 이용 권한이 없습니다(코드 20). 공공데이터포털에서 "기획예산처_국고보조금 정보" 활용신청 및 승인 상태를 확인하세요.'],
+  [/DATAGO\[DEADLINE_HAS_EXPIRED_ERROR/,'datago_key_expired','인증키 사용 기한이 만료되었습니다(코드 31). 공공데이터포털에서 이용 기간을 갱신하세요.'],
+  [/DATAGO\[LIMITED_NUMBER_OF_SERVICE_REQUESTS/,'datago_rate_limited','호출 허용량(일/초당)을 초과했습니다(코드 22/23). 잠시 후 또는 호출량 초기화 후 다시 시도하세요.'],
   [/HTTP_(401|403)/,'forbidden','인증 실패 또는 접근 차단입니다. API 키와 서비스 이용 승인 상태를 확인하세요.'],
   [/HTTP_(429)/,'rate_limited','호출 한도를 초과했습니다. 잠시 후 다시 시도하세요.'],
   [/HTTP_5\d\d/,'upstream_error','상대 서버 오류입니다. 잠시 후 다시 시도하세요.'],
@@ -194,6 +208,7 @@ export async function testOfficialConnector(env,connectorId,config={}){
   const d=OFFICIAL_CONNECTORS[connectorId];if(!d)throw new Error('unknown_connector');const cfg={...d.default_config,...config};let pack,rows;
   if(connectorId==='bok_ecos'){pack=await collectEcos(env,cfg);rows=pack.rows;}
   else if(connectorId==='openfiscal'){pack=await collectOpenFiscal(env,cfg);rows=pack.rows;}
+  else if(connectorId==='bojo_openapi'&&cfg.endpoint_url?.includes('/T_OPD_PRMSCT_SBBGST')){pack=await collectBojo(env,cfg);rows=pack.rows;}
   else if(connectorId==='bis_cpmi'||connectorId==='ecb_supervisory'){const t0=Date.now();rows=connectorId==='bis_cpmi'?await collectBis(cfg):await collectEcb(cfg);pack={meta:{elapsed_ms:Date.now()-t0,series:(cfg.series||[]).length}};}
   else throw new Error('connector_test_not_supported');
   const periods=rows.map(x=>String(x.period||'')).filter(Boolean).sort();return {ok:true,connector_id:connectorId,fetched:rows.length,first_period:periods[0]||null,last_period:periods.at(-1)||null,metrics:[...new Set(rows.map(x=>x.metric_code))],meta:pack?.meta||null};

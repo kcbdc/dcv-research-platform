@@ -51,3 +51,11 @@
 - BIS·ECB(SDMX) 수집: 타임아웃 30초 + 1회 재시도, 시리즈 병렬 조회. 타임아웃 오류에 경과시간·시도 횟수 포함.
 - ECB 전용 힌트(`timeout_ecb`): 브라우저 확인 URL과 GitHub Actions 대체 수집 안내.
 - `testOfficialConnector`가 `bis_cpmi`/`ecb_supervisory`도 지원(소요 시간 `elapsed_ms` 반환).
+
+# v0.10.11 (추가) — BOJO(보조금) `HTTP_500 APPLICATION_ERROR`
+- 요청 형식(serviceKey/pageNo/numOfRows/resultType/bsnsyear)은 data.go.kr 명세와 일치 → 요청 오류가 아니라 게이트웨이 내부 오류(코드 01, "잠시 후 재호출").
+- `collectBojo`: 25초 타임아웃 + 5xx 최대 2회 재시도, HTTP 200으로 오는 게이트웨이 오류(JSON/XML)도 감지, 비JSON 응답은 라벨링.
+- `responseText`: data.go.kr 오류 본문을 `DATAGO[errMsg/코드]:메시지` 로 요약(기존엔 120자 절단으로 원인 코드가 잘림).
+- `ERROR_HINTS`: APPLICATION_ERROR/타임아웃/파라미터/키 미등록/권한/만료/호출한도별 해결 힌트.
+- `testOfficialConnector`가 `bojo_openapi` 지원(테스트 버튼이 `connector_test_not_supported`로 실패하던 문제).
+- 테스트: `tests/v0112_bojo_datago_error.test.mjs` 4건.

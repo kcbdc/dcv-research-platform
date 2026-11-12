@@ -19,3 +19,6 @@
 ## 추가 (hybrid 모드에서 연구실이 안 도는 문제)
 - 원인: wrangler.jsonc 의 COMPUTE_EXECUTOR=hybrid 이고 EXTERNAL_RUNTIME 이 없어서, Worker 크론의 scheduleLab() 이 매분 `waiting_for_github_actions` 만 반환하고 종료.
 - `LAB_RUN_ON_WORKER=true` 이면 Worker 크론이 직접 연구실 작업을 실행(opt-in). wrangler.jsonc 에 설정 추가, LAB_DEADLINE_AT 을 2026-11-30T14:59:59Z 로 변경.
+
+## 추가 (lab_ai_timeout)
+- 자료작성자(writer)/리더는 max_tokens 4500 의 70B 생성이라 45초 타임아웃에 걸림 → 기본 120초(그 외 60초), `LAB_AI_TIMEOUT_MS` 로 조정(30~150초). 임대(lease) 시간 180s→240s.

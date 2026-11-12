@@ -6,7 +6,7 @@ import {LAB_ROLES,MANUSCRIPT_SECTIONS,DEFAULT_DEADLINE,makeLabPlan,normalizeConf
 import {readLabSnapshot,promptEvidence,collectLabLiterature} from './lab_evidence.js';
 import {buildLabPackage,labReadiness} from './lab_package.js';
 
-const MAX_ATTEMPTS=3,LEASE_MS=180000;
+const MAX_ATTEMPTS=3,LEASE_MS=240000;
 const safeConfig=campaign=>safeJson(campaign.config_json);
 const nextTime=(c,cursor)=>new Date(Date.parse(c.starts_at)+(Date.parse(c.deadline_at)-900000-Date.parse(c.starts_at))*cursor/c.total_tasks).toISOString();
 async function writeBatches(db,statements){for(let i=0;i<statements.length;i+=40)await db.batch(statements.slice(i,i+40));}
@@ -70,7 +70,9 @@ async function inferLabTask(env,c,t,snapshot,inputs){
  const model=env.LAB_AI_MODEL||'@cf/meta/llama-3.3-70b-instruct-fp8-fast';
  inputsCompact.references=inputsCompact.references.slice(0,60).map(r=>({...r,abstract:r.abstract?.slice(0,400)}));
  const request=env.AI.run(model,{messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(inputsCompact)}],max_tokens:role.id==='writer'||role.id==='leader'?4500:1800,temperature:.1});
- let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('lab_ai_timeout')),45000);});
+ // Writer/leader generate up to 4500 tokens on a 70B model; 45s was too short (cursor 8 = writer timed out). Override with LAB_AI_TIMEOUT_MS.
+ const aiTimeoutMs=Math.min(150000,Math.max(30000,Number(env.LAB_AI_TIMEOUT_MS)||(role.id==='writer'||role.id==='leader'?120000:60000)));
+ let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`lab_ai_timeout:${Math.round(aiTimeoutMs/1000)}s:${role.id}`)),aiTimeoutMs);});
  let response;try{response=await Promise.race([request,timeout]);}finally{clearTimeout(timer);}
  const text=typeof response==='string'?response:response?.response||response?.result?.response;
  const output=validateLabOutput(extractJson(text),role,inputs.sources);

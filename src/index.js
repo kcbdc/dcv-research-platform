@@ -12,7 +12,8 @@ import { aiJson } from './lib/ai.js';
 import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration, seedBundledEmpiricalPanel } from './lib/empirical.js';
 import { scientificSignoff } from './lib/approve.js';
 import { latestProtocol } from './lib/rigor.js';
-import { registerEvidence, approvalGates } from './lib/evidence.js';
+import { registerEvidence, approvalGates, assertNotHumanFrozen, setHumanFreeze, isHumanFrozen } from './lib/evidence.js';
+import { humanPoolStatus, setHumanPool } from './lib/human_pool.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
 import { explainFdicError, resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
 import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus, testOfficialConnectorSafe, collectDueOfficialSources } from './lib/official_sources.js';
@@ -60,7 +61,7 @@ async function collectOfficialInline(env,{projectId=null,limit=2,force=false}={}
   const byProject=new Map();
   for(const x of r.attempted)if(x.ok&&x.inserted>0)byProject.set(x.project_id,(byProject.get(x.project_id)||0)+x.inserted);
   for(const [pid,inserted] of byProject){
-    try{await registerEvidence(env,pid,{kind:'EXTERNAL_DATA',source:'official_inline_collector',detail:{inserted}});await enqueueOnce(env,pid,'measure_project',{},30);}catch(_){}
+    try{const ev=await registerEvidence(env,pid,{kind:'EXTERNAL_DATA',source:'official_inline_collector',detail:{inserted}});if(!ev?.deferred)await enqueueOnce(env,pid,'measure_project',{},30);}catch(_){}
   }
   return r;
 }
@@ -218,11 +219,11 @@ async function api(request,env,ctx=null){
 
   if(parts[0]==='api' && parts[1]==='projects' && parts[2]){
     const projectId=parts[2];
-    if(parts[3]==='redesign'&&method==='POST'){try{return json(await applyRedesign(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:e.message},400);}}
-    if(parts[3]==='rebalance-v2'&&method==='POST'){try{return json(await applyBalancedRedesign(env,projectId),201);}catch(e){return json({error:e.message},400);}}
+    if(parts[3]==='redesign'&&method==='POST'){try{await assertNotHumanFrozen(env,projectId);return json(await applyRedesign(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:e.message},400);}}
+    if(parts[3]==='rebalance-v2'&&method==='POST'){try{await assertNotHumanFrozen(env,projectId);return json(await applyBalancedRedesign(env,projectId),201);}catch(e){return json({error:e.message},400);}}
     if(parts[3]==='lab'){
       try{return await labApi(request,env,projectId,parts);}
-      catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:400);}
+      catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:/human_freeze_active/.test(String(e))?409:400);}
     }
     if(parts.length===3 && method==='GET'){
       const [pRes,defRes,measRes]=await env.DB.batch([
@@ -290,6 +291,7 @@ async function api(request,env,ctx=null){
       await audit(env,projectId,'user','source.created','data_source',id,b); return json({id},201);
     }
     if(parts[3]==='observations' && method==='POST'){
+      await assertNotHumanFrozen(env,projectId);
       const b=await bodyJson(request), rows=Array.isArray(b)?b:(b.rows||[b]), stmts=[];
       for(const r of rows.slice(0,1000)) stmts.push(env.DB.prepare(`INSERT INTO raw_observations(id,project_id,source_id,observed_at,ingested_at,key,value_num,value_text,payload_json,quality_json) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(uid('obs'),projectId,null,r.observed_at||nowIso(),nowIso(),r.key||'signal',Number.isFinite(Number(r.value))?Number(r.value):null,Number.isFinite(Number(r.value))?null:String(r.value??''),JSON.stringify(r),JSON.stringify({manual:true})));
       if(stmts.length) await env.DB.batch(stmts); const ev=stmts.length?await registerEvidence(env,projectId,{kind:'RAW_OBSERVATION',source:'manual_api',detail:{inserted:stmts.length}}):null; return json({inserted:stmts.length,revalidation:ev});
@@ -305,6 +307,7 @@ async function api(request,env,ctx=null){
     if(parts[3]==='validation-matrix' && method==='POST'){ return json(await refreshValidationMatrix(env,projectId)); }
     if(parts[3]==='scenarios' && method==='GET'){ return json({scenarios:await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? ORDER BY scenario_type,name`,[projectId])}); }
     if(parts[3]==='scenarios' && method==='POST'){
+      await assertNotHumanFrozen(env,projectId);
       const b=await bodyJson(request), rows=Array.isArray(b)?b:(b.rows||[b]), stmts=[];
       for(const r of rows.slice(0,500)) stmts.push(env.DB.prepare(`INSERT INTO scenarios(id,project_id,name,scenario_type,severity,volatility,delay_multiplier,loss_multiplier,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(uid('scenario'),projectId,r.name||'scenario',r.scenario_type||'historical',Number(r.severity||1),Number(r.volatility||1),Number(r.delay_multiplier||1),Number(r.loss_multiplier||1),JSON.stringify(r.metadata||{}),nowIso()));
       if(stmts.length) await env.DB.batch(stmts); bust(env,projectId); const ev=stmts.length?await registerEvidence(env,projectId,{kind:'SCENARIO',source:'manual_api',detail:{inserted:stmts.length}}):null; return json({inserted:stmts.length,revalidation:ev},201);
@@ -318,9 +321,11 @@ async function api(request,env,ctx=null){
       const profile=await ensureEmpiricalProfile(env,projectId); return json({profile,readiness:await empiricalReadiness(env,projectId)});
     }
     if(parts[3]==='empirical' && parts[4]==='seed-panel' && method==='POST'){
+      await assertNotHumanFrozen(env,projectId);
       const result=await seedBundledEmpiricalPanel(env,projectId); const ev=await registerEvidence(env,projectId,{kind:'EMPIRICAL_EPISODE',source:'bundled_panel_manual',detail:{rows:result.rows}}); await enqueueOnce(env,projectId,'measure_project',{},30,2); return json({...result,revalidation:ev},201);
     }
     if(parts[3]==='empirical' && parts[4]==='episodes' && method==='POST'){
+      await assertNotHumanFrozen(env,projectId);
       const b=await bodyJson(request),rows=Array.isArray(b)?b:(b.rows||[]),result=await importEmpiricalEpisodes(env,projectId,rows); const ev=result.inserted?await registerEvidence(env,projectId,{kind:'EMPIRICAL_EPISODE',source:'manual_import',detail:{inserted:result.inserted}}):null; await enqueueOnce(env,projectId,'refit_empirical',{},22); return json({...result,revalidation:ev},201);
     }
     if(parts[3]==='empirical' && parts[4]==='refit' && method==='POST'){
@@ -332,8 +337,12 @@ async function api(request,env,ctx=null){
     if(parts[3]==='external-validity' && parts[4]==='evaluations' && method==='POST'){ try{return json(await recordExternalValidityEvaluation(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:String(e.message||e)},400);} }
     if(parts[3]==='reviewer-glmm-package' && method==='GET'){ return json(await buildReviewerGlmmPackage(env,projectId)); }
     if(parts[3]==='replication' && method==='GET'){ return json(await replicationStatus(env,projectId)); }
-    if(parts[3]==='replication' && parts[4]==='start' && method==='POST'){ const b=await bodyJson(request); return json(await startIndependentReplication(env,projectId,b),201); }
-    if(parts[3]==='human-invites' && method==='POST'){ const b=await bodyJson(request);const count=Math.max(1,Math.min(50,Number(b.count||1)));if(count>1){const prefix=String(b.subject_prefix||'P').slice(0,40),invites=[];for(let i=0;i<count;i++)invites.push(await issueHumanInvite(env,projectId,{label:b.label?`${b.label} ${i+1}`:null,subject_key:`${prefix}${String(i+1).padStart(3,'0')}`}));return json({count:invites.length,invites},201);}if(!b.subject_key)return json({error:'subject_key_required',message:'Use a stable external respondent/recruitment ID; it is hashed server-side and never stored in plaintext.'},400);return json(await issueHumanInvite(env,projectId,{label:b.label||null,subject_key:b.subject_key}),201); }
+    if(parts[3]==='replication' && parts[4]==='start' && method==='POST'){ await assertNotHumanFrozen(env,projectId); const b=await bodyJson(request); return json(await startIndependentReplication(env,projectId,b),201); }
+    if(parts[3]==='human-freeze' && method==='GET'){ const r=await one(env.DB,`SELECT human_freeze,human_freeze_at,human_freeze_reason,human_freeze_cycle,research_cycle FROM projects WHERE id=?`,[projectId]); return r?json({human_freeze:Number(r.human_freeze||0)===1,human_freeze_at:r.human_freeze_at,human_freeze_reason:r.human_freeze_reason,human_freeze_cycle:r.human_freeze_cycle,research_cycle:Number(r.research_cycle||1)}):json({error:'project_not_found'},404); }
+    if(parts[3]==='human-pool' && method==='GET'){ try{return json(await humanPoolStatus(env,projectId));}catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:400);} }
+    if(parts[3]==='human-pool' && method==='POST'){ const b=await bodyJson(request); try{return json(await setHumanPool(env,projectId,{enabled:!!b.enabled}));}catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:/pool_not_allowed/.test(String(e))?409:400);} }
+    if(parts[3]==='human-freeze' && method==='POST'){ const b=await bodyJson(request); try{return json(await setHumanFreeze(env,projectId,{enabled:!!b.enabled,reason:b.reason}));}catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:/human_freeze_active/.test(String(e))?409:400);} }
+  if(parts[3]==='human-invites' && method==='POST'){ const b=await bodyJson(request);const count=Math.max(1,Math.min(50,Number(b.count||1)));if(count>1){const prefix=String(b.subject_prefix||'P').slice(0,40),invites=[];for(let i=0;i<count;i++)invites.push(await issueHumanInvite(env,projectId,{label:b.label?`${b.label} ${i+1}`:null,subject_key:`${prefix}${String(i+1).padStart(3,'0')}`}));return json({count:invites.length,invites},201);}if(!b.subject_key)return json({error:'subject_key_required',message:'Use a stable external respondent/recruitment ID; it is hashed server-side and never stored in plaintext.'},400);return json(await issueHumanInvite(env,projectId,{label:b.label||null,subject_key:b.subject_key}),201); }
     if(parts[3]==='constraint-sensitivity' && method==='GET'){
       const p=await one(env.DB,`SELECT pr.research_cycle,pc.constraints_json FROM projects pr JOIN project_config pc ON pc.project_id=pr.id WHERE pr.id=?`,[projectId]);if(!p)return json({error:'project_not_found'},404);
       const cycle=Number(p.research_cycle||1),rows=await all(env.DB,`SELECT r.candidate_id,r.phase,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.created_at FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('exploration','refinement')`,[projectId,cycle]);

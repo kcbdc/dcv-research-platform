@@ -1249,3 +1249,9 @@ html,body{overflow-x:clip!important}
 .human-resume-note i{margin-right:.35rem}
 
 #humanFreezeBtn.is-frozen{border-color:#e5484d;color:#e5484d;font-weight:700}
+
+/* Research report matrix: keep candidate identity visible while panning wide evidence columns. */
+#reportModal .report-html table{display:block!important;width:100%!important;max-width:100%!important;overflow-x:auto!important;overflow-y:hidden!important;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch!important}
+#reportModal .report-html table th,#reportModal .report-html table td{white-space:nowrap!important;min-width:max-content!important}
+#reportModal .report-html table th:first-child,#reportModal .report-html table td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 #d9e0e4}
+#reportModal .report-html{min-width:0!important;max-width:100%!important}

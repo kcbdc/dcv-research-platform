@@ -345,11 +345,11 @@ async function bootstrapDCV(){
 }
 // v0.10.13: pool prior-cycle completed main_v2 participants (opt-in; refused for replication cycles)
 (function(){try{const btn=document.querySelector('#humanPoolBtn');if(!btn)return;let st=null,busy=false;
-const paint=()=>{if(!st)return;btn.textContent=st.enabled?`이전 주기 합산 중 · ${st.poolable_total}/${st.required_participants}명`:`이전 주기 합산: 가능 ${st.poolable_total}명`;btn.title=`현재 주기 ${st.research_cycle} · 이전 주기 포함 ${st.prior_included}명 · 동일인 중복 제외 ${st.deduped_same_subject} · 과제설정 불일치 제외 ${st.prior_excluded_protocol_mismatch} · 미완료 ${st.prior_excluded_incomplete}`;};
+const paint=()=>{if(!st)return;btn.textContent=st.enabled?`과거 적격 ${st.poolable_total}/${st.required_participants}명 · ${st.eligibility_status}`:`과거 재검증 ${st.poolable_total}/${st.required_participants}명 · ${st.eligibility_status}`;btn.title=`현재 주기 ${st.research_cycle} · 이전 주기 포함 ${st.prior_included}명 · 동일인 중복 제외 ${st.deduped_same_subject} · 과제설정 불일치 제외 ${st.prior_excluded_protocol_mismatch} · 신원검증 불가 ${st.prior_excluded_identity_unverified} · 미완료 ${st.prior_excluded_incomplete} · 부족 ${st.shortfall}명`;};
 const refresh=async()=>{if(!current||busy)return;busy=true;try{st=await api(`/api/projects/${current}/human-pool`);paint();}catch(_){}finally{busy=false;}};
 btn.onclick=async()=>{if(!current)return;await refresh();if(!st)return;const on=!st.enabled;
  if(on&&st.replication_cycle){alert('독립 복제 주기는 새로운 인간표본이 필요해 합산할 수 없습니다.');return;}
- if(!confirm(on?`이전 주기에서 완료한 main_v2 참가자를 현재 표본에 합산합니다.\n합산 가능 ${st.poolable_total}명 (기준 ${st.required_participants}명)\n동일 과제설정·품질 통과·동일인 1회만 포함됩니다.\n계속할까요?`:'이전 주기 합산을 해제합니다. 현재 주기 참가자만으로 다시 계산됩니다.'))return;
+ if(!confirm(on?`이전 주기에서 완료한 main_v2 참가자를 현재 표본에 합산합니다.\n합산 가능 ${st.poolable_total}명 (기준 ${st.required_participants}명)\n동일 과제설정·품질 및 교차주기 신원검증 통과·동일인 1회만 포함됩니다.\n계속할까요?`:'이전 주기 합산을 해제합니다. 현재 주기 참가자만으로 다시 계산됩니다.'))return;
  try{st=await api(`/api/projects/${current}/human-pool`,{method:'POST',body:JSON.stringify({enabled:on})});paint();}catch(e){alert(`합산 설정을 바꾸지 못했습니다: ${e.message||e}`);}};
 const info=document.querySelector('#participantCountInfo');if(info&&window.MutationObserver)new MutationObserver(()=>refresh()).observe(info,{childList:true,characterData:true,subtree:true});
 if(typeof setTimeout==='function')setTimeout(refresh,2000);}catch(_){}})();

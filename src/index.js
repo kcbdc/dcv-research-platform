@@ -6,7 +6,7 @@ import { all, one, run, enqueue, enqueueOnce, audit } from './lib/db.js';
 import { bust } from './lib/memo.js';
 import { processJobs, processFastLane, scheduleAll, advanceProject } from './lib/orchestrator.js';
 import { dispatchGithubActionsIfNeeded, githubRunnerStatus } from './lib/github_dispatch.js';
-import { generateReport, upgradeStoredReport, patchLiveHumanChecklist } from './lib/report.js';
+import { generateReport, upgradeStoredReport, patchLiveHumanChecklist, patchLiveOfficialTable, patchLiveHumanPool, patchLegacyMatrixLabels } from './lib/report.js';
 import { buildThesisData, exportCsv, EXPORT_NAMES } from './lib/thesis.js';
 import { aiJson } from './lib/ai.js';
 import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration, seedBundledEmpiricalPanel } from './lib/empirical.js';
@@ -374,15 +374,20 @@ async function api(request,env,ctx=null){
         if(r&&!stale){try{r=await upgradeStoredReport(env,projectId,r);}catch(e){/* 구버전 보고서는 그대로 반환 */}}
         return {r,stale};
       };
-      const [{r,stale},liveHuman]=await Promise.all([loadReport(),humanStats(env,projectId,Number(p?.research_cycle||1),hp?.human_protocol||null,{main_n:hp?.human_main_n,attention_n:hp?.human_attention_n})]);
+      const [{r,stale},liveHuman,liveOfficial,livePool]=await Promise.all([loadReport(),humanStats(env,projectId,Number(p?.research_cycle||1),hp?.human_protocol||null,{main_n:hp?.human_main_n,attention_n:hp?.human_attention_n}),
+        officialSourceStatus(env,projectId).catch(()=>({sources:[]})),humanPoolStatus(env,projectId).catch(()=>null)]);
       const minHuman=Number(hp?.min_human_participants||32);
-      if(stale && Number(liveHuman?.protocol_participants||0)>=minHuman) await enqueueOnce(env,projectId,'generate_report',{},105,1);
-      const liveNotice=`> 현재 저장된 인간실험: 누적 참가자 ${Number(liveHuman?.participants||0)}명 / 관측 ${Number(liveHuman?.observations||0)}건, 현재 인간실험 규약 대상 ${Number(liveHuman?.protocol_participants||0)}명, 주분석 적격 완료 ${Number(liveHuman?.publication_participants||0)}명(사전 기준 ${minHuman}명), 과거 주기·규약별 완료 기록 ${Number(liveHuman?.historical_completed_participants||0)}명(주기 간 중복 가능).
+      if((stale && Number(liveHuman?.protocol_participants||0)>=minHuman) || (stale&&livePool?.enabled&&Number(livePool.poolable_total||0)>=minHuman)) await enqueueOnce(env,projectId,'generate_report',{},105,1);
+      const liveNotice=`> 현재 저장된 인간실험: 누적 참가자 ${Number(liveHuman?.participants||0)}명 / 관측 ${Number(liveHuman?.observations||0)}건, 현재 인간실험 규약 대상 ${Number(liveHuman?.protocol_participants||0)}명, 현재 주기 적격 완료 ${Number(liveHuman?.publication_participants||0)}명, 합산 적용 적격 ${livePool?.enabled?Number(livePool.poolable_total||0):Number(liveHuman?.publication_participants||0)}명(사전 기준 ${minHuman}명), 과거 주기·규약별 완료 기록 ${Number(liveHuman?.historical_completed_participants||0)}명(주기 간 중복 가능). ${livePool?.enabled?`과거 적격 재검증 합산 ${livePool.poolable_total}명 / ${minHuman}명 (${livePool.eligibility_status}).`:"과거 자료 합산 미활성화."}
 > 아래 본문의 수치·표는 보고서 작성 당시의 증거 스냅샷(Cycle ${r?.research_cycle||'-'} · Evidence r${r?.evidence_revision??'-'})입니다.${stale?' 현재 보고서는 이전 증거 스냅샷이며 최신 보고서 재생성을 자동 요청했습니다.':''} 단, 논문 사용 전 점검 사항의 인간 참가자 현황은 현재 DB 상태를 반영해 표시합니다.
 
 `;
-      const md=r?patchLiveHumanChecklist(r.content_markdown,{...liveHuman,min_participants:minHuman}):'';
-      return r?json({...r,stale,live_human:liveHuman,current_cycle:Number(p?.research_cycle||1),current_revision:Number(p?.evidence_revision||0),content_markdown:liveNotice+md,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
+      const md=r?patchLegacyMatrixLabels(patchLiveOfficialTable(patchLiveHumanPool(patchLiveHumanChecklist(r.content_markdown,{
+        ...liveHuman,
+        publication_participants:livePool?.enabled?Number(livePool.poolable_total||0):liveHuman.publication_participants,
+        min_participants:minHuman
+      }),livePool),liveOfficial)):'';
+      return r?json({...r,stale,live_human:liveHuman,live_pool:livePool,live_official:liveOfficial,current_cycle:Number(p?.research_cycle||1),current_revision:Number(p?.evidence_revision||0),content_markdown:liveNotice+md,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
     }
     if(parts[3]==='report' && method==='POST'){ if(['github-actions','hybrid'].includes(env.COMPUTE_EXECUTOR)){await enqueueOnce(env,projectId,'generate_report',{},95);return json({status:'queued',transport:'github-actions'},202);} return json(await generateReport(env,projectId)); }
     if(parts[3]==='thesis' && method==='GET'){ try{ return json(await buildThesisData(env,projectId)); }catch(e){ return json({error:String(e.message||e)},e.message==='project_not_found'?404:500); } }

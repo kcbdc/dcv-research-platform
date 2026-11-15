@@ -73,6 +73,18 @@ function subsetScenarioStatus(result, constraints, predicate){
   return { code, label:STATUS_META[code].label, n:entries.length, basis:entries.some(([,v])=>v?.classification)?'scenario_classification':'scenario_metric_inference' };
 }
 function wrapStatus(code, extra={}){ const c=STATUS_META[code]||STATUS_META.MISSING; return { code, label:c.label, rank:c.rank, ...extra }; }
+// Report cells display measured evidence, not only categorical decisions.
+// A missing measurement must remain explicitly pending; it cannot be converted to PASS.
+function evidenceMetrics(run, result, group=null, predicate=null){
+  const scenarioEntries=predicate?Object.entries(result?.scenario_scores||{}).filter(([key])=>predicate(key)):[];
+  const groupObj=group?result?.validation_groups?.[group]:null;
+  const values=scenarioEntries.map(([,v])=>v||{});
+  const candidate=[groupObj,...values,run,result].filter(Boolean);
+  const value=(key)=>candidate.map(x=>x[key]).find(x=>x!==null&&x!==undefined&&x!==''&&Number.isFinite(Number(x)));
+  const count=predicate?scenarioEntries.length:(run?Number(run.n||0):0);
+  return {count,loss_mean:value('loss_mean'),fp_rate:value('fp_rate'),fn_rate:value('fn_rate'),review_burden:value('review_burden'),recovery_time:value('recovery_time')};
+}
+
 
 export function levelTable(cands, key) {
   const m = new Map();
@@ -137,13 +149,14 @@ export async function buildThesisData(env, projectId) {
   const candidateStageSnapshot = (candId) => {
     const historicalRun = byCandPhase.get(`${candId}|historical`), syntheticRun = byCandPhase.get(`${candId}|confirmation`), stressRun = byCandPhase.get(`${candId}|stress`);
     const hr=safeJson(historicalRun?.result_json,{}),sr=safeJson(syntheticRun?.result_json,{}),stressResult=safeJson(stressRun?.result_json,{});
-    const hist = wrapStatus(classToStatusCode(hr.validation_groups?.Historical?.classification||hr.classification), { source:'historical_phase' });
-    const syn = wrapStatus(classToStatusCode(sr.validation_groups?.Synthetic?.classification||sr.classification), { source:'confirmation_phase' });
-    const pick=(g,pred)=>{const c=stressResult.validation_groups?.[g]?.classification;if(c)return wrapStatus(classToStatusCode(c),{source:'validation_group'});const z=subsetScenarioStatus(stressResult,constraints,pred);return wrapStatus(z.code,z);};
+    const hist = wrapStatus(classToStatusCode(hr.validation_groups?.Historical?.classification||hr.classification), { source:'historical_phase',measurements:evidenceMetrics(historicalRun,hr,'Historical') });
+    const syn = wrapStatus(classToStatusCode(sr.validation_groups?.Synthetic?.classification||sr.classification), { source:'confirmation_phase',measurements:evidenceMetrics(syntheticRun,sr,'Synthetic') });
+    const pick=(g,pred)=>{const c=stressResult.validation_groups?.[g]?.classification;const measurements=evidenceMetrics(null,stressResult,g,pred);if(c)return wrapStatus(classToStatusCode(c),{source:'validation_group',measurements});const z=subsetScenarioStatus(stressResult,constraints,pred);return wrapStatus(z.code,{...z,measurements});};
     const adv = pick('Adversarial',k=>!/^official_(bis|ecb)_/i.test(k));
     const bis = pick('BIS',k=>/^official_bis_/i.test(k));
     const ecb = pick('ECB',k=>/^official_ecb_/i.test(k));
-    const human = wrapStatus(validationToStatusCode(humanValidation.get(candId)?.status), { source:'human_recompute_validation' });
+    const hv=humanValidation.get(candId),humanResult=safeJson(hv?.result_json,{});
+    const human = wrapStatus(validationToStatusCode(hv?.status), { source:'human_recompute_validation',measurements:{count:hv?1:0,loss_mean:humanResult.loss_mean??null,fp_rate:humanResult.fp_rate??null,fn_rate:humanResult.fn_rate??null,review_burden:humanResult.review_burden??null,recovery_time:humanResult.recovery_time??null} });
     return { historical: hist, synthetic: syn, adversarial: adv, bis, ecb, human };
   };
   const stageSnapshots = new Map(cands.map(c => [c.id, candidateStageSnapshot(c.id)]));

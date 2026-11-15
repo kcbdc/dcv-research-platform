@@ -28,11 +28,36 @@ async function snapshot(env,p,reason,nextRevision,nextCycle){
   const snap={project_status:p.status,current_stage:p.current_stage,research_cycle:Number(p.research_cycle||1),evidence_revision:Number(p.evidence_revision||0),counts};
   await run(env.DB,`INSERT INTO evidence_snapshots(id,project_id,research_cycle,evidence_revision,reason,snapshot_json,created_at) VALUES(?,?,?,?,?,?,?)`,[uid('snapshot'),p.id,Number(p.research_cycle||1),nextRevision,reason,JSON.stringify(snap),nowIso()]);
 }
+export const AUTO_INGEST_SOURCES=new Set(['scheduled_collector','official_inline_collector']);
+export async function isHumanFrozen(env,projectId){
+  try{const r=await one(env.DB,`SELECT human_freeze FROM projects WHERE id=?`,[projectId]);return Number(r?.human_freeze||0)===1;}catch(_){return false;}
+}
+export async function assertNotHumanFrozen(env,projectId){
+  if(await isHumanFrozen(env,projectId)){const e=new Error('human_freeze_active');e.code='human_freeze_active';throw e;}
+}
+export async function setHumanFreeze(env,projectId,{enabled,reason=null}={}){
+  const p=await one(env.DB,`SELECT research_cycle,human_freeze FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
+  const on=enabled?1:0,ts=nowIso(),cycle=Number(p.research_cycle||1);
+  await run(env.DB,`UPDATE projects SET human_freeze=?,human_freeze_at=?,human_freeze_reason=?,human_freeze_cycle=? WHERE id=?`,[on,on?ts:null,on?(reason?String(reason).slice(0,200):null):null,on?cycle:null,projectId]);
+  bust(env,projectId);
+  await audit(env,projectId,'admin',on?'human_freeze.enabled':'human_freeze.disabled','project',projectId,{research_cycle:cycle,reason:reason||null});
+  return {human_freeze:!!on,research_cycle:cycle,human_freeze_at:on?ts:null};
+}
 export async function registerEvidence(env,projectId,{kind,impact_from=null,source='user',detail={},force_new_cycle=false,config_update=null}={}){
   const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
   const impact=impact_from||impactForEvidence(kind);
   const started=await one(env.DB,`SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? LIMIT 1`,[projectId,Number(p.research_cycle||1)]);
+  // v0.10.13: scheduled/inline collectors only append data. They must never open a new research cycle,
+  // because a cycle change strands human participants, sessions and invite codes. The rows stay in the
+  // raw tables; the next deliberate design/evidence change picks them up.
+  if(started && AUTO_INGEST_SOURCES.has(String(source)) && ['EXTERNAL_DATA','EMPIRICAL_EPISODE'].includes(String(kind||'').toUpperCase())){
+    await run(env.DB,`UPDATE projects SET deferred_data_events=COALESCE(deferred_data_events,0)+1,deferred_data_at=? WHERE id=?`,[nowIso(),projectId]);
+    await audit(env,projectId,'agent','evidence.deferred','project',projectId,{kind,source,research_cycle:Number(p.research_cycle||1),detail});
+    return{deferred:true,evidence_revision:Number(p.evidence_revision||0),research_cycle:Number(p.research_cycle||1),impact_from:impact,full_cycle:false};
+  }
   const fullCycle=!!started && (force_new_cycle||['define','measure','compute'].includes(impact));
+  // v0.10.12: a frozen human experiment must never be moved to a new research cycle.
+  if(fullCycle && Number(p.human_freeze||0)===1){const e=new Error('human_freeze_active');e.code='human_freeze_active';throw e;}
   const nextRevision=Number(p.evidence_revision||0)+1,nextCycle=Number(p.research_cycle||1)+(fullCycle?1:0),ts=nowIso();
   if(fullCycle) await snapshot(env,p,`${kind}:${impact}`,nextRevision,nextCycle);
   const from=earlierStage(earlierStage(p.current_stage||impact,p.revalidation_from||impact),impact);

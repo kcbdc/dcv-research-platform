@@ -192,6 +192,7 @@ export async function testOfficialConnectorSafe(env,connectorId,config={}){
 export async function collectDueOfficialSources(env,{projectId=null,limit=2,force=false,budgetMs=40000}={}){
   const now=nowIso(),where=["kind='official_connector'",'enabled=1'],binds=[];
   if(projectId){where.push('project_id=?');binds.push(projectId);}
+  where.push('project_id NOT IN (SELECT id FROM projects WHERE human_freeze=1)'); // v0.10.12 human freeze
   if(!force){where.push("COALESCE(next_fetch_at,'1970-01-01T00:00:00.000Z')<=?");binds.push(now);}
   const order=force?"COALESCE(last_fetched_at,'') ASC,id":"COALESCE(next_fetch_at,'1970-01-01T00:00:00.000Z'),id";
   const sources=await all(env.DB,`SELECT * FROM data_sources WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,[...binds,Math.max(1,Math.min(8,Number(limit)||2))]);

@@ -11,7 +11,7 @@ import { approveProject } from './approve.js';
 import { generateReport } from './report.js';
 import { compareStudy } from './crosscase.js';
 import { refitEmpiricalCalibration, seedBundledEmpiricalPanel } from './empirical.js';
-import { approvalGates, registerEvidence } from './evidence.js';
+import { approvalGates, registerEvidence, isHumanFrozen } from './evidence.js';
 import {syncReplicationStatus} from './replication.js';
 
 // phase 컬럼(마이그레이션 0007)과 (project_id,type,status,phase) 인덱스로 존재 여부만 확인한다.
@@ -42,6 +42,8 @@ const TERMINAL_STATUSES = new Set(['complete','report_ready']);
 async function recoverProtocolCycle(env,projectId,reason){
   const p=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]);
   if(!p)return null;
+  // v0.10.12: never auto-open a new cycle while a human experiment is frozen.
+  if(await isHumanFrozen(env,projectId))return {skipped:'human_freeze_active',reason};
   const ev=await registerEvidence(env,projectId,{
     kind:'DESIGN_CHANGE',impact_from:'define',force_new_cycle:true,source:'runtime_protocol_recovery_v0.8.9',
     detail:{reason,from_cycle:Number(p.research_cycle||1),action:'preserve prior cycle; start fresh cycle under current frozen runtime protocol'}
@@ -201,7 +203,7 @@ async function execute(env,job){
   switch(job.type){
     case 'seed_empirical_panel': return seedBundledEmpiricalPanel(env,id);
     case 'define_project': { const r=await defineProject(env,id); if(r.status==='CONFIRM') await enqueue(env,id,'collect_project',{},20); return r; }
-    case 'collect_project': { const r=await collectProject(env,id,{dueOnly:!!payload.refresh}); if(Number(r.inserted||0)+Number(r.empiricalRows||0)>0) await registerEvidence(env,id,{kind:Number(r.empiricalRows||0)>0?'EMPIRICAL_EPISODE':'EXTERNAL_DATA',source:'scheduled_collector',detail:{inserted:r.inserted,empiricalRows:r.empiricalRows}}); if(Number(r.empiricalRows||0)>0) await enqueueOnce(env,id,'refit_empirical',{},22);
+    case 'collect_project': { if(await isHumanFrozen(env,id)) return {skipped:'human_freeze_active'}; const r=await collectProject(env,id,{dueOnly:!!payload.refresh}); let ev=null; if(Number(r.inserted||0)+Number(r.empiricalRows||0)>0) ev=await registerEvidence(env,id,{kind:Number(r.empiricalRows||0)>0?'EMPIRICAL_EPISODE':'EXTERNAL_DATA',source:'scheduled_collector',detail:{inserted:r.inserted,empiricalRows:r.empiricalRows}}); if(ev?.deferred) return {...r,deferred:true}; if(Number(r.empiricalRows||0)>0) await enqueueOnce(env,id,'refit_empirical',{},22);
       // 주기 갱신(refresh)에서 새로 들어온 행이 없으면 측정 → 후보 재시드 연쇄를 건너뛴다. 최초 실행은 항상 진행.
       if(!(payload.refresh && Number(r.inserted||0)===0 && Number(r.empiricalRows||0)===0)) await enqueue(env,id,'measure_project',{},30);
       return r; }
@@ -229,6 +231,7 @@ export async function processJobs(env){
     if(['protocol_runtime_upgrade_required','protocol_integrity_failure','protocol_drift_after_simulation_start'].includes(e.message)){
       env.RUNNER_JOB_OBSERVER?.(job.type,'job_protocol_recovery',e);
       const recovery=await recoverProtocolCycle(env,job.project_id,e.message);
+      if(recovery?.skipped==='human_freeze_active'){env.RUNNER_JOB_OBSERVER?.(job.type,'job_failed',e);await finishJob(env,job,e);results.push({id:job.id,type:job.type,ok:false,error:String(e),frozen:true});continue;}
       // registerEvidence already superseded the running/queued jobs in the old cycle. Do not call
       // finishJob here, otherwise it would requeue this obsolete job and recreate the deadlock.
       results.push({id:job.id,type:job.type,ok:true,recovered:true,recovery});break;

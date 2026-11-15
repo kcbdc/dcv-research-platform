@@ -2,6 +2,7 @@ import { all, one, run, audit, enqueue } from './db.js';
 import { nowIso, uid, mulberry32, quantile, safeJson } from './util.js';
 import { latestDefinition } from './define.js';
 import { bust } from './memo.js';
+import { selectPoolForCycle, isReplicationCycle } from './human_pool.js';
 
 function metrics(rows){
   const correct=rows.filter(r=>Number(r.ai_correct)===1), wrong=rows.filter(r=>Number(r.ai_correct)===0);
@@ -53,23 +54,33 @@ export function fitMixedLogitApprox(rows,{iterations=220,lambda=4}={}){
  return {status:'CONFIRM',method:'penalized_random_intercept_logit_v1',n:rows.length,participants:ids.length,coefficients:{intercept:b[0],ai_correct:b[1],confidence_z:b[2],ai_correct_x_confidence:b[3]},participant_intercept_sd:sd,confidence_center:.75,confidence_scale:.2,penalty_lambda:lambda,scope:'Operational MAP approximation of the preregistered random-intercept logistic model; confirmatory publication inference should use the exported trial-level data in a full GLMM implementation.'};
 }
 export async function fitReviewerModel(env,projectId){
-  const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
+  const p=await one(env.DB,`SELECT research_cycle,evidence_revision,human_pool_prior_cycles FROM projects WHERE id=?`,[projectId]);
   const def=await latestDefinition(env,projectId),v=def?.content?.validation||{},protocol=String(v.human_protocol||'main_v2'),cycle=Number(p?.research_cycle||1);
   const fastMs=Number(v.human_fast_ms||800),slowMs=Number(v.human_slow_ms||60000),mainRequired=Number(v.human_main_n||30),attentionRequired=Number(v.human_attention_n||3);
   // Current-cycle, normalized trial metadata is authoritative. This prevents old-cycle rows with the
   // same protocol string from leaking into the current reviewer model and avoids JSON-expression scans.
-  const state=await all(env.DB,`SELECT rt.participant_hash,
+  // v0.10.13: opt-in pooling of completed main_v2 participants from earlier cycles (same task-settings hash,
+  // one session per subject). Never used for independent-replication cycles (fresh sample required).
+  const poolOn=Number(p?.human_pool_prior_cycles||0)===1&&!(await isReplicationCycle(env,projectId));
+  let completedIds,excludedIds,poolStats=null;
+  if(poolOn){
+    const {humanProtocolHash}=await import('./human_trials.js');
+    const sel=await selectPoolForCycle(env,projectId,{protocol,cycle,hash:await humanProtocolHash(env,projectId),mainRequired,attentionRequired});
+    completedIds=sel.included;excludedIds=new Set();poolStats=sel.stats;
+  }else{
+    const state=await all(env.DB,`SELECT rt.participant_hash,
       SUM(CASE WHEN rt.trial_phase='main' AND rt.status='done' THEN 1 ELSE 0 END) main_n,
       SUM(CASE WHEN rt.trial_phase='attention' AND rt.status='done' THEN 1 ELSE 0 END) attention_n,
       EXISTS(SELECT 1 FROM reviewer_quality_flags q WHERE q.project_id=rt.project_id AND q.participant_hash=rt.participant_hash AND q.protocol_version=rt.protocol_version AND q.research_cycle=rt.research_cycle AND q.severity='EXCLUDE') excluded
     FROM reviewer_trials rt
     WHERE rt.project_id=? AND rt.protocol_version=? AND rt.research_cycle=?
     GROUP BY rt.participant_hash`,[projectId,protocol,cycle]);
-  const completedIds=new Set(state.filter(x=>Number(x.main_n||0)>=mainRequired&&Number(x.attention_n||0)>=attentionRequired).map(x=>String(x.participant_hash)));
-  const excludedIds=new Set(state.filter(x=>Number(x.excluded||0)===1).map(x=>String(x.participant_hash)));
+    completedIds=new Set(state.filter(x=>Number(x.main_n||0)>=mainRequired&&Number(x.attention_n||0)>=attentionRequired).map(x=>String(x.participant_hash)));
+    excludedIds=new Set(state.filter(x=>Number(x.excluded||0)===1).map(x=>String(x.participant_hash)));
+  }
   let rows=await all(env.DB,`SELECT o.participant_hash,o.ai_confidence,o.ai_correct,o.human_accept,o.response_ms,o.recovered,o.recovery_ms,o.created_at
     FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id
-    WHERE o.project_id=? AND rt.project_id=? AND rt.protocol_version=? AND rt.research_cycle=? AND rt.trial_phase='main' AND rt.attention_check=0
+    WHERE o.project_id=? AND rt.project_id=? AND rt.protocol_version=? AND ${poolOn?'rt.research_cycle<=?':'rt.research_cycle=?'} AND rt.trial_phase='main' AND rt.attention_check=0
       AND o.response_ms>=? AND o.response_ms<=?
     ORDER BY o.created_at`,[projectId,projectId,protocol,cycle,fastMs,slowMs]);
   rows=rows.filter(r=>completedIds.has(String(r.participant_hash))&&!excludedIds.has(String(r.participant_hash)));
@@ -79,13 +90,14 @@ export async function fitReviewerModel(env,projectId){
   const gate={participants:{observed:participantN,required:minParticipants,pass:participantN>=minParticipants},correct_trials:{observed:correctN,required:minCorrect,pass:correctN>=minCorrect},wrong_trials:{observed:wrongN,required:minWrong,pass:wrongN>=minWrong}};
   const cluster=clusterBootstrap(rows,B,20261004),disc=cluster?.ci95?.discrimination_delta||null;
   const minDelta=Number(v.human_min_discrimination_delta??.15);gate.discrimination={estimate:metrics(rows).discrimination_delta,ci95:disc,required:`cluster-bootstrap lower bound >= ${minDelta}`,minimum_effect:minDelta,pass:!!disc&&Number(disc.lo)>=minDelta};
-  gate.quality={excluded_participants:excludedIds.size,completed_participants:completedIds.size,protocol,pass:true};
+  gate.quality={excluded_participants:excludedIds.size,completed_participants:completedIds.size,protocol,pass:true,human_pool:poolStats};
   if(!Object.values(gate).filter(x=>x&&typeof x==='object'&&'pass'in x).every(x=>x.pass)){
     await run(env.DB,`UPDATE projects SET reviewer_hold_marker=? WHERE id=?`,[lastObserved,projectId]);
     await audit(env,projectId,'agent','reviewer.fit.hold','project',projectId,{n:rows.length,gate,reason:'human_qc_or_discrimination_gate',cluster_bootstrap:cluster});
     return {status:'HOLD',n:rows.length,participants:participantN,gate,cluster_bootstrap:cluster};
   }
   const point=metrics(rows),byConfidence=[...new Set(rows.map(r=>Number(r.ai_confidence)))].sort((a,b)=>a-b).map(confidence=>({confidence,...metrics(rows.filter(r=>Number(r.ai_confidence)===confidence))})),mixed=fitMixedLogitApprox(rows),model={...point,by_confidence:byConfidence,mixed_effects:mixed,participant_accept_sd:Number(mixed.participant_intercept_sd||0),participants:participantN,human_protocol:protocol,last_observed_at:lastObserved,cluster_bootstrap:cluster,sample_gate:gate,quality_control:{fast_ms:Number(v.human_fast_ms||800),slow_ms:Number(v.human_slow_ms||60000),max_fast_share:Number(v.human_max_fast_share||.30),attention_fail_max:Number(v.human_attention_fail_max||1),min_discrimination_delta:Number(v.human_min_discrimination_delta||.15),excluded_participants:excludedIds.size},analysis_plan:'Operational reviewer model fits penalized random-intercept logistic accept ~ ai_correct * confidence + (1|participant), stores confidence-stratified rates, and gates promotion with participant-cluster bootstrap plus a preregistered minimum discrimination effect. Full confirmatory GLMM inference remains reproducible from exported trial-level data.',unit_of_inference:'participant cluster'};
+  model.human_pool=poolStats;
   const ver=await one(env.DB,`SELECT COALESCE(MAX(version),0) v FROM reviewer_models WHERE project_id=?`,[projectId]);
   const id=uid('reviewermodel');await run(env.DB,`INSERT INTO reviewer_models(id,project_id,version,model_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?)`,[id,projectId,(ver?.v||0)+1,JSON.stringify(model),nowIso(),Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]);
   bust(env,projectId,'reviewer:latest'); await audit(env,projectId,'agent','reviewer.fit.complete','reviewer_model',id,model); await enqueue(env,projectId,'recompute_project',{},65);

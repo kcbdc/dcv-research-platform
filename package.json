@@ -1,6 +1,6 @@
 {
   "name": "dcv-research-platform",
-  "version": "0.10.9",
+  "version": "0.10.13",
   "private": true,
   "type": "module",
   "scripts": {

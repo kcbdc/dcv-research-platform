@@ -33,6 +33,51 @@ export function matrixEvidenceCell(stage){
 }
 
 
+// Refresh the *display* of a saved evidence snapshot without mutating its archived results.
+// No missing measurement is fabricated; current connector coverage is explicitly labeled live.
+export function patchLiveOfficialTable(markdown,official={}){
+  const sources=official?.sources||[];
+  if(!sources.length)return String(markdown||'');
+  const rows=sources.map(x=>{
+    const cov=x.coverage||{},count=Number(cov.rows||0);
+    let status=count>0?(x.using_cached_data?'이전 수집자료 유지':x.readiness==='ok'?'수집 완료':'수집자료 보유'):'수집 대기';
+    if(x.readiness==='DISABLED')status='비활성';
+    else if(x.readiness==='SECRET_MISSING')status='인증정보 확인 필요';
+    else if(x.readiness==='CONFIG_REQUIRED')status='설정 필요';
+    const first=cov.first_period||'-',last=cov.last_period||'-';
+    return [x.case_layer||'-',x.connector_id||'-',x.data_role||'-',status,count,`${first} ~ ${last}`];
+  });
+  const table=mdTable(['Case','Connector','역할','상태','관측행','기간'],rows);
+  const text=String(markdown||'');
+  const heading='**표 3E. 공식 외부데이터 연결현황**';
+  const ix=text.indexOf(heading);
+  if(ix<0)return text;
+  const start=text.indexOf('\n|',ix+heading.length);
+  if(start<0)return text;
+  let end=start;
+  const lines=text.slice(start+1).split('\n');
+  for(const line of lines){if(!line.trim().startsWith('|'))break;end+=line.length+1;}
+  const lead='\n\n> 최신 DB 연결현황 (현재 조회 시점). 아래 표만 최신 수집 상태이며, 다른 분석 결과는 보고서 생성 당시 스냅샷입니다.\n\n';
+  return text.slice(0,ix+heading.length)+lead+table+text.slice(end);
+}
+
+export function patchLiveHumanPool(markdown,pool={}){
+  if(!pool?.enabled)return String(markdown||'');
+  const status=pool.replication_cycle?'독립 재현 주기: 합산 금지':pool.eligibility_status==='PASS'?'참가자 수 기준 충족':'참가자 수 기준 미달';
+  const line=`- 과거 완료 기록 재검증 후 현재 분석 합산: **${Number(pool.poolable_total||0)}명 / 기준 ${Number(pool.required_participants||32)}명 (${status})**. 이전 주기 인정 ${Number(pool.prior_included||0)}명, 동일인 중복 제외 ${Number(pool.deduped_same_subject||0)}건, 규약 불일치 ${Number(pool.prior_excluded_protocol_mismatch||0)}건, 교차주기 신원확인 불가 ${Number(pool.prior_excluded_identity_unverified||0)}건. 실제 검토자 모델의 품질·판별력 및 Human 재계산 통과 여부는 별도 검증합니다.`;
+  const text=String(markdown||'');
+  return text.replace(/(## 논문 사용 전 점검 사항\s*\n)/,`$1\n${line}\n`);
+}
+
+export function patchLegacyMatrixLabels(markdown){
+  // Archived reports may contain a verdict-only matrix. Preserve failures as failures.
+  return String(markdown||'').replace(/(\*\*표 9B\.[^\n]*\*\*[\s\S]*?)(?=\n(?:##|###|\*\*표 9C|> 해석:)|$)/g,section=>section
+    .replace(/\bFAILED\b/g,'미통과 · 수치 미기록')
+    .replace(/\bN\/A\b/g,'미검증 · 수치 없음')
+    .replace(/\bSURVIVED\b/g,'통과 · 수치 미기록')
+    .replace(/\bBOUNDARY\b/g,'경계 · 추가검증 필요'));
+}
+
 export function patchLiveHumanChecklist(markdown,live={}){
   const md=String(markdown||'');
   const protocolN=Number(live.protocol_participants??live.eligible_participants??0);

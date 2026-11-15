@@ -268,11 +268,20 @@ async function loadOfficialStatus(){
   if(!current||!document.getElementById('officialStatus'))return;
   try{
     const r=await api(`/api/projects/${current}/official-sources/status`),src=r.sources||[],layers=r.layers||[],maps=r.mappings||[];
-    const ready=src.filter(x=>x.last_status==='ok').length,errs=src.filter(x=>String(x.last_status||'').startsWith('error')).length;
-    document.getElementById('officialBadge').className=`status-pill ${errs?'warn':ready?'good':'neutral'}`;
-    document.getElementById('officialBadge').textContent=errs?`${errs} ERROR`:ready?`${ready}/${src.length} SYNCED`:src.length?`${src.length} CONFIGURED`:'NOT CONFIGURED';
+    const ready=src.filter(x=>x.last_status==='ok').length;
+    const stale=src.filter(x=>String(x.last_status||'').startsWith('degraded:')).length;
+    const pending=src.filter(x=>String(x.last_status||'').startsWith('retry:')).length;
+    const errs=src.filter(x=>String(x.last_status||'').startsWith('error:')).length;
+    document.getElementById('officialBadge').className=`status-pill ${errs||stale||pending?'warn':ready?'good':'neutral'}`;
+    document.getElementById('officialBadge').textContent=errs?`${errs} ERROR`:stale||pending?`${stale+pending} RETRY`:ready?`${ready}/${src.length} SYNCED`:src.length?`${src.length} CONFIGURED`:'NOT CONFIGURED';
+    const sourceLine=x=>{
+      const state=String(x.last_status||'');
+      const status=state.startsWith('degraded:')?'일시 장애 · 이전 수집자료 유지 · 30분 후 재시도':state.startsWith('retry:')?'일시 장애 · 수집 재시도 예정':x.readiness||state||'not fetched';
+      const detail=(state.startsWith('degraded:')||state.startsWith('retry:'))?' · 연결 시간 초과(HTTP 522 등): 원격 서버 응답 대기 중':x.last_error?` · 최근 오류: ${x.last_error.error}${x.last_error.hint?` (${x.last_error.hint})`:''}`:'';
+      return `${x.case_layer}/${x.connector_id} · ${x.data_role||'-'} · ${status}${x.requires_secret?` · ${x.secret_name} ${x.secret_configured?'✓':'미설정'}`:''}${detail} · rows ${x.coverage?.rows||0} · ${x.coverage?.first_period||'-'}~${x.coverage?.last_period||'-'}`;
+    };
     const mlines=maps.map(x=>{const p=x.payload||{},c=x.components||{};if(x.mapping_key==='D_CPMI')return `MAP D_CPMI · ${x.method_version} · ${x.period||'-'} · D*=${Number(x.value_num).toFixed(3)} · level=${Number(c.historical_level_percentile??NaN).toFixed(3)} · fast-share=${Number(c.fast_payment_share??NaN).toFixed(3)}`;if(x.mapping_key==='R_ECB')return `MAP R_ECB · ${x.method_version} · ${x.period||'-'} · R=${Number(x.value_num).toFixed(3)} · θ*=${Number(p.theta_external??NaN).toFixed(3)} · LCR=${Number(c.lcr_pct??NaN).toFixed(1)} · CET1=${Number(c.cet1_pct??NaN).toFixed(1)}`;return `MAP ${x.mapping_key} · ${x.value_num}`;});
-    document.getElementById('officialStatus').textContent=[...layers.map(x=>`${x.layer_code} · ${x.case_name} · ${x.status}`),...src.map(x=>`${x.case_layer}/${x.connector_id} · ${x.data_role||'-'} · ${x.readiness||x.last_status||'not fetched'}${x.requires_secret?` · ${x.secret_name} ${x.secret_configured?'✓':'미설정'}`:''}${x.last_error?` · 최근 오류: ${x.last_error.error}${x.last_error.hint?` (${x.last_error.hint})`:''}`:''} · rows ${x.coverage?.rows||0} · ${x.coverage?.first_period||'-'}~${x.coverage?.last_period||'-'}`),...mlines,...(()=>{const pl=r.pipeline;if(!pl||!src.some(x=>x.readiness==='QUEUED_OR_NOT_FETCHED'))return [];const out=[];if(pl.executor==='hybrid'&&pl.collect_jobs_queued){out.push(`※ 수집 작업 ${pl.collect_jobs_queued}건이 GitHub Actions 러너 대기 중${pl.github_actions_configured===false?' (GITHUB_ACTIONS_TOKEN 미설정 → 자동 기동 불가)':pl.github_runner_active?'':' (러너 비활성)'}. ‘공식 데이터 수집’ 버튼을 누르면 Worker에서 즉시 수집합니다.`);}else out.push('※ 아직 수집 전입니다. ‘공식 데이터 수집’ 버튼으로 즉시 실행할 수 있습니다(5분마다 자동 수집됨).');return out;})()].join('\n')||'공식 데이터 계층이 없습니다.';
+    document.getElementById('officialStatus').textContent=[...layers.map(x=>`${x.layer_code} · ${x.case_name} · ${x.status}`),...src.map(sourceLine),...mlines,...(()=>{const pl=r.pipeline;if(!pl||!src.some(x=>x.readiness==='QUEUED_OR_NOT_FETCHED'))return [];const out=[];if(pl.executor==='hybrid'&&pl.collect_jobs_queued){out.push(`※ 수집 작업 ${pl.collect_jobs_queued}건이 GitHub Actions 러너 대기 중${pl.github_actions_configured===false?' (GITHUB_ACTIONS_TOKEN 미설정 → 자동 기동 불가)':pl.github_runner_active?'':' (러너 비활성)'}. ‘공식 데이터 수집’ 버튼을 누르면 Worker에서 즉시 수집합니다.`);}else out.push('※ 아직 수집 전입니다. ‘공식 데이터 수집’ 버튼으로 즉시 실행할 수 있습니다(5분마다 자동 수집됨).');return out;})()].join('\n')||'공식 데이터 계층이 없습니다.';
   }catch(e){document.getElementById('officialStatus').textContent=`공식 데이터 상태 조회 실패: ${e.message}`;}
 }
 function matrixClass(code){return code==='PASS'?'matrix-pass':code==='FAIL'?'matrix-fail':code==='HOLD'?'matrix-hold':code==='PARTIAL'?'matrix-partial':'matrix-missing';}

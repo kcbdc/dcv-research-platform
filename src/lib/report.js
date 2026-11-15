@@ -230,7 +230,8 @@ function rvLimit(t) {
 export async function upgradeStoredReport(env, projectId, row) {
   if (!row) return row;
   const oldMd=String(row.content_markdown||'');
-  const current=oldMd.includes(MODEL_MARKER)&&oldMd.includes('그림 M0.')&&oldMd.includes('주장 범위(Claim Scope Matrix)')&&!/오수용\(FP\)|미탐\(FN\)|기본 0\.45, 1\.4|용어 주의/.test(oldMd);
+  const matrixIsCurrent=!oldMd.includes('**표 9B.') || (oldMd.includes('**표 9B. 대표 후보 External Validation Matrix (상위 20행 · 실측지표/판정)**') && oldMd.includes('각 셀은 D1에 저장된 해당 후보·단계의 측정값'));
+  const current=matrixIsCurrent&&oldMd.includes(MODEL_MARKER)&&oldMd.includes('그림 M0.')&&oldMd.includes('주장 범위(Claim Scope Matrix)')&&!/오수용\(FP\)|미탐\(FN\)|기본 0\.45, 1\.4|용어 주의/.test(oldMd);
   if(current) return row;
   const data = JSON.parse(row.data_json || '{}'), nar = data.narrative;
   if (!nar || !nar.abstract) return row;

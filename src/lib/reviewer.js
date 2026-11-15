@@ -2,7 +2,7 @@ import { all, one, run, audit, enqueue } from './db.js';
 import { nowIso, uid, mulberry32, quantile, safeJson } from './util.js';
 import { latestDefinition } from './define.js';
 import { bust } from './memo.js';
-import { selectPoolForCycle, isReplicationCycle } from './human_pool.js';
+import { selectPoolForCycle, isReplicationCycle, poolKey } from './human_pool.js';
 
 function metrics(rows){
   const correct=rows.filter(r=>Number(r.ai_correct)===1), wrong=rows.filter(r=>Number(r.ai_correct)===0);
@@ -78,12 +78,15 @@ export async function fitReviewerModel(env,projectId){
     completedIds=new Set(state.filter(x=>Number(x.main_n||0)>=mainRequired&&Number(x.attention_n||0)>=attentionRequired).map(x=>String(x.participant_hash)));
     excludedIds=new Set(state.filter(x=>Number(x.excluded||0)===1).map(x=>String(x.participant_hash)));
   }
-  let rows=await all(env.DB,`SELECT o.participant_hash,o.ai_confidence,o.ai_correct,o.human_accept,o.response_ms,o.recovered,o.recovery_ms,o.created_at
+  let rows=await all(env.DB,`SELECT o.participant_hash,rt.research_cycle,o.ai_confidence,o.ai_correct,o.human_accept,o.response_ms,o.recovered,o.recovery_ms,o.created_at
     FROM reviewer_observations o JOIN reviewer_trials rt ON rt.id=o.trial_id
     WHERE o.project_id=? AND rt.project_id=? AND rt.protocol_version=? AND ${poolOn?'rt.research_cycle<=?':'rt.research_cycle=?'} AND rt.trial_phase='main' AND rt.attention_check=0
       AND o.response_ms>=? AND o.response_ms<=?
     ORDER BY o.created_at`,[projectId,projectId,protocol,cycle,fastMs,slowMs]);
-  rows=rows.filter(r=>completedIds.has(String(r.participant_hash))&&!excludedIds.has(String(r.participant_hash)));
+  rows=rows.filter(r=>(poolOn?completedIds.has(poolKey(r.research_cycle,r.participant_hash)):completedIds.has(String(r.participant_hash)))&&!excludedIds.has(String(r.participant_hash)));
+  // Participant-cluster inference must use a distinct identity for every validated person.
+  // Only one cycle per cross-cycle subject enters the pooled model.
+  if(poolOn)rows=rows.map(r=>({...r,participant_hash:poolKey(r.research_cycle,r.participant_hash)}));
   const lastObserved=rows.at(-1)?.created_at??'';
   const minParticipants=Number(v.min_human_participants||32),minCorrect=Number(v.min_human_correct_trials||300),minWrong=Number(v.min_human_wrong_trials||200),B=Math.max(300,Math.min(1000,Number(v.cluster_bootstrap_n||300)));
   const participantN=new Set(rows.map(r=>String(r.participant_hash))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;

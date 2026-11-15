@@ -9,9 +9,11 @@ import { safeJson } from './util.js';
 import { bust } from './memo.js';
 import { registerEvidence } from './evidence.js';
 
+export const poolKey=(cycle,hash)=>`${Number(cycle)}|${String(hash)}`;
+
 export function selectPoolParticipants(trialRows,sessionRows,{cycle,mainRequired=30,attentionRequired=3}={}){
-  const subj=new Map((sessionRows||[]).map(s=>[`${s.participant_hash}|${Number(s.research_cycle)}`,s.subject_hash||null]));
-  const stats={current_completed:0,prior_candidates:0,prior_included:0,prior_excluded_incomplete:0,prior_excluded_flagged:0,prior_excluded_protocol_mismatch:0,deduped_same_subject:0,cycles_pooled:[]};
+  const subj=new Map((sessionRows||[]).map(s=>[poolKey(s.research_cycle,s.participant_hash),s.subject_hash||null]));
+  const stats={current_completed:0,prior_candidates:0,prior_included:0,prior_excluded_incomplete:0,prior_excluded_flagged:0,prior_excluded_protocol_mismatch:0,prior_excluded_identity_unverified:0,deduped_same_subject:0,cycles_pooled:[]};
   const eligible=[];
   for(const r of trialRows||[]){
     const rc=Number(r.research_cycle),prior=rc<Number(cycle);
@@ -20,14 +22,16 @@ export function selectPoolParticipants(trialRows,sessionRows,{cycle,mainRequired
     if(!complete){if(prior)stats.prior_excluded_incomplete++;continue;}
     if(Number(r.excluded||0)===1){if(prior)stats.prior_excluded_flagged++;continue;}
     if(prior&&Number(r.hash_ok||0)!==1){stats.prior_excluded_protocol_mismatch++;continue;}
-    eligible.push({participant_hash:String(r.participant_hash),research_cycle:rc,subject:subj.get(`${r.participant_hash}|${rc}`)||`p:${r.participant_hash}`});
+    // A stable cross-cycle subject identifier is required to establish independent persons.
+    if(prior&&!subj.get(poolKey(rc,r.participant_hash))){stats.prior_excluded_identity_unverified++;continue;}
+    eligible.push({participant_hash:String(r.participant_hash),research_cycle:rc,subject:subj.get(poolKey(rc,r.participant_hash))||`p:${r.participant_hash}`});
   }
   // current cycle first, then earliest cycle: that record represents the subject
   eligible.sort((a,b)=>(b.research_cycle===Number(cycle))-(a.research_cycle===Number(cycle))||a.research_cycle-b.research_cycle);
   const seen=new Set(),included=new Set(),cycles=new Set();
   for(const e of eligible){
     if(seen.has(e.subject)){stats.deduped_same_subject++;continue;}
-    seen.add(e.subject);included.add(e.participant_hash);
+    seen.add(e.subject);included.add(poolKey(e.research_cycle,e.participant_hash));
     if(e.research_cycle===Number(cycle))stats.current_completed++;else{stats.prior_included++;cycles.add(e.research_cycle);}
   }
   stats.cycles_pooled=[...cycles].sort((a,b)=>a-b);
@@ -59,7 +63,8 @@ export async function humanPoolStatus(env,projectId){
   const def=await latestDefinition(env,projectId),v=def?.content?.validation||{};
   const cycle=Number(p.research_cycle||1),hash=await humanProtocolHash(env,projectId);
   const sel=await selectPoolForCycle(env,projectId,{protocol:String(v.human_protocol||HUMAN_PROTOCOL),cycle,hash,mainRequired:Number(v.human_main_n||30),attentionRequired:Number(v.human_attention_n||3)});
-  return {enabled:Number(p.human_pool_prior_cycles||0)===1,research_cycle:cycle,replication_cycle:await isReplicationCycle(env,projectId),poolable_total:sel.included.size,required_participants:Number(v.min_human_participants||32),...sel.stats};
+  const required=Number(v.min_human_participants||32),replication=await isReplicationCycle(env,projectId);
+  return {enabled:Number(p.human_pool_prior_cycles||0)===1,research_cycle:cycle,replication_cycle:replication,poolable_total:sel.included.size,required_participants:required,eligibility_status:replication?'BLOCKED_REPLICATION':sel.included.size>=required?'PASS':'HOLD',shortfall:Math.max(0,required-sel.included.size),...sel.stats};
 }
 
 export async function setHumanPool(env,projectId,{enabled}={}){

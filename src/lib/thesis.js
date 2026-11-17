@@ -240,8 +240,9 @@ export async function buildThesisData(env, projectId) {
     stages:funnelStages,
     initial_candidates:cands.length,
     evaluated_layers:funnelStages.filter(x=>x.key!=='baseline'&&!x.unavailable).length,
-    final_survivors:funnelStages.some(x=>x.key!=='baseline'&&!x.unavailable)?strictPool.length:0,
-    final_rate:cands.length&&funnelStages.some(x=>x.key!=='baseline'&&!x.unavailable)?strictPool.length/cands.length:0,
+    provisional_survivors:strictPool.length,
+    final_survivors:funnelStages.some(x=>x.key!=='baseline'&&x.unavailable)?0:strictPool.length,
+    final_rate:cands.length&&!funnelStages.some(x=>x.key!=='baseline'&&x.unavailable)?strictPool.length/cands.length:0,
     method:'STRICT_CUMULATIVE_PASS_v1',
     basis:'CURRENT_PROJECT_ONLY',
     project_id:projectId,
@@ -249,7 +250,7 @@ export async function buildThesisData(env, projectId) {
     research_cycle:cycle,
     evidence_revision:rev,
     generated_at:nowIso(),
-    note:'Current-project result only. Every displayed count is calculated from this project current candidate_validation_matrix for the active research_cycle/evidence_revision; no illustrative or example survivor counts are inserted. Strict cumulative funnel: a candidate advances only after PASS at every available preceding gate. HOLD and candidate-level N/A are pending, not survivors. If an entire validation layer is unavailable, the preceding count is carried forward and that layer is labelled N/A.'
+    note:'For unavailable gates, survivors is a carried-forward candidate count, NOT a confirmed stage PASS; pending counts are unresolved. Current-project result only. Every displayed count is calculated from this project current candidate_validation_matrix for the active research_cycle/evidence_revision; no illustrative or example survivor counts are inserted. Strict cumulative funnel: a candidate advances only after PASS at every available preceding gate. HOLD and candidate-level N/A are pending, not survivors. If an entire validation layer is unavailable, the preceding count is carried forward and that layer is labelled N/A.'
   };
 
   // Preserve the last computed Matrix/Funnel as a visibly dated historical snapshot
@@ -291,8 +292,9 @@ export async function buildThesisData(env, projectId) {
         }
         survival_funnel.stages=stages;
         survival_funnel.initial_candidates=old.length;
-        survival_funnel.final_survivors=pool.length;
-        survival_funnel.final_rate=pool.length/old.length;
+        survival_funnel.provisional_survivors=pool.length;
+        survival_funnel.final_survivors=stages.some(x=>x.key!=='baseline'&&x.unavailable)?0:pool.length;
+        survival_funnel.final_rate=survival_funnel.final_survivors/old.length;
         survival_funnel.research_cycle=Number(previous.research_cycle);
         survival_funnel.evidence_revision=Number(previous.evidence_revision);
         survival_funnel.generated_at=previous.updated_at;

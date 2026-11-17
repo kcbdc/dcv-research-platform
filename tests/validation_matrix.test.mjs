@@ -109,3 +109,31 @@ test('GET refreshes Matrix after a later simulation run, without replacing true 
   assert.equal(v.rows[0].synthetic_status,'FAIL');
   assert.equal(v.rows[0].bis_status,'NA');
 });
+
+
+test('Matrix restores stress subset evidence when validation_groups are omitted',async()=>{
+  const DB=makeDb(),pid=await seedProject(DB,{candidates:1,reviewer:0,episodes:0}),cid='cand_0',ts=now();
+  DB.raw.prepare(`DELETE FROM simulation_runs WHERE project_id=? AND candidate_id=?`).run(pid,cid);
+  DB.raw.prepare(`DELETE FROM validations WHERE project_id=? AND candidate_id=?`).run(pid,cid);
+  const evidence=JSON.stringify({scenario_scores:{
+    adversarial_delay:{classification:'FEASIBLE',loss_mean:0.1},
+    official_bis_cpmi:{classification:'INFEASIBLE',loss_mean:9},
+    official_ecb_resilience:{classification:'UNRESOLVED'}
+  }});
+  DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision) VALUES('stress_subset',?,?,'stress',1,3,?,?,0)`).run(pid,cid,evidence,ts);
+  const vm=await getValidationMatrix({DB},pid),r=vm.rows[0];
+  assert.equal(r.adversarial_status,'PASS');
+  assert.equal(r.bis_status,'FAIL');
+  assert.equal(r.ecb_status,'HOLD');
+  assert.equal(r.historical_status,'NA');
+  assert.equal(r.human_status,'NA');
+});
+
+test('Stress scenario metrics without valid constraints are HOLD not PASS',async()=>{
+  const DB=makeDb(),pid=await seedProject(DB,{candidates:1,reviewer:0,episodes:0}),cid='cand_0',ts=now();
+  DB.raw.prepare(`DELETE FROM simulation_runs WHERE project_id=? AND candidate_id=?`).run(pid,cid);
+  DB.raw.prepare(`UPDATE project_config SET constraints_json='{}' WHERE project_id=?`).run(pid);
+  DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision) VALUES('stress_metric',?,?,'stress',1,3,?,?,0)`).run(pid,cid,JSON.stringify({scenario_scores:{official_bis_sample:{loss_mean:0.001}}}),ts);
+  const vm=await getValidationMatrix({DB},pid);
+  assert.equal(vm.rows[0].bis_status,'HOLD');
+});

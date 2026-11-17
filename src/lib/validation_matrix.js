@@ -4,6 +4,27 @@ import { nowIso, uid, safeJson } from './util.js';
 const DIMS=['Synthetic','Historical','Adversarial','BIS','ECB','Human'];
 const classStatus=v=>v==='FEASIBLE'?'PASS':v==='INFEASIBLE'?'FAIL':v==='UNRESOLVED'?'HOLD':'NA';
 const validationStatus=v=>v==='CONFIRM'?'PASS':v==='REJECT'?'FAIL':v==='HOLD'?'HOLD':'NA';
+
+// Match thesis.js scenario-level evidence fallback. Missing metrics/constraints are
+// HOLD (insufficient evidence), never an invented PASS.
+function scenarioGate(result,group,predicate,constraints){
+  const explicit=result?.validation_groups?.[group]?.classification;
+  if(explicit)return classStatus(explicit);
+  const scenarios=Object.entries(result?.scenario_scores||{}).filter(([key])=>predicate(key));
+  if(!scenarios.length)return 'NA';
+  const codes=scenarios.map(([,score])=>{
+    if(score?.classification)return classStatus(score.classification);
+    const checks=[];
+    for(const [metric,limit] of [['loss_mean','loss_max'],['loss_exceed_rate','loss_exceed_max'],['fp_rate','fp_max'],['fn_rate','fn_max'],['review_burden','review_burden_max'],['recovery_time','recovery_time_max']]){
+      if(score?.[metric]!=null&&constraints?.[limit]!=null&&Number.isFinite(Number(score[metric]))&&Number.isFinite(Number(constraints[limit]))) checks.push(Number(score[metric])<=Number(constraints[limit]));
+    }
+    return !checks.length?'HOLD':checks.every(Boolean)?'PASS':'FAIL';
+  });
+  if(codes.includes('FAIL'))return 'FAIL';
+  if(codes.includes('HOLD')||codes.includes('NA'))return 'HOLD';
+  return codes.every(c=>c==='PASS')?'PASS':'HOLD';
+}
+
 function overall(row){
   const xs=DIMS.map(k=>row[k.toLowerCase()+'_status']).filter(x=>x&&x!=='NA');
   if(xs.includes('FAIL'))return 'FAIL';
@@ -18,6 +39,8 @@ export async function refreshValidationMatrix(env,projectId){
   if(!p)throw new Error('project_not_found');
   const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
   const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY id`,[projectId,cycle]);
+  const config=await one(env.DB,`SELECT constraints_json FROM project_config WHERE project_id=?`,[projectId]);
+  const constraints=safeJson(config?.constraints_json,{});
   if(!cands.length)return {rows:0,cycle,revision:rev};
   const runs=await all(env.DB,`SELECT r.candidate_id,r.phase,r.result_json FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress') ORDER BY r.created_at DESC`,[projectId,cycle,rev]);
   const runMap=latestByCandidate(runs);
@@ -30,9 +53,9 @@ export async function refreshValidationMatrix(env,projectId){
     const row={
       synthetic_status:classStatus(conf.validation_groups?.Synthetic?.classification||conf.classification),
       historical_status:classStatus(hist.validation_groups?.Historical?.classification||hist.classification),
-      adversarial_status:classStatus(groups.Adversarial?.classification),
-      bis_status:classStatus(groups.BIS?.classification),
-      ecb_status:classStatus(groups.ECB?.classification),
+      adversarial_status:scenarioGate(stress,'Adversarial',k=>!/^official_(bis|ecb)_/i.test(k),constraints),
+      bis_status:scenarioGate(stress,'BIS',k=>/^official_bis_/i.test(k),constraints),
+      ecb_status:scenarioGate(stress,'ECB',k=>/^official_ecb_/i.test(k),constraints),
       human_status:h?validationStatus(h.status):'NA'
     };
     row.overall_status=overall(row);
@@ -62,7 +85,23 @@ export async function getValidationMatrix(env,projectId){
     [projectId,currentCycle,projectId,currentCycle,currentRev,projectId,currentCycle,currentRev]);
   const cachedTime=rows.reduce((m,r)=>String(r.updated_at||'')>m?String(r.updated_at):m,'');
   const newEvidence=[source?.latest_run,source?.latest_human].some(t=>String(t||'')>cachedTime);
-  if(Number(source?.candidates||0)>0 && (rows.length!==Number(source.candidates)||newEvidence)){
+  // Deployment upgrades may add scenario-level interpretation without changing
+  // run timestamps. Rebuild a legacy NA-only cache once from stored stress evidence.
+  let legacyScenarioCache=false;
+  if(rows.some(r=>r.adversarial_status==='NA'||r.bis_status==='NA'||r.ecb_status==='NA')){
+    const stressRows=await all(env.DB,`SELECT r.candidate_id,r.result_json FROM simulation_runs r
+      JOIN design_candidates c ON c.id=r.candidate_id
+      WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase='stress'
+      ORDER BY r.created_at DESC`,[projectId,currentCycle,currentRev]);
+    const latest=new Map();for(const r of stressRows)if(!latest.has(r.candidate_id))latest.set(r.candidate_id,safeJson(r.result_json,{}));
+    legacyScenarioCache=rows.some(row=>{
+      const result=latest.get(row.candidate_id);if(!result)return false;
+      return [['adversarial',k=>!/^official_(bis|ecb)_/i.test(k)],['bis',k=>/^official_bis_/i.test(k)],['ecb',k=>/^official_ecb_/i.test(k)]].some(([gate,pred])=>
+        row[gate+'_status']==='NA' && Object.keys(result.scenario_scores||{}).some(pred));
+    });
+  }
+
+  if(Number(source?.candidates||0)>0 && (rows.length!==Number(source.candidates)||newEvidence||legacyScenarioCache)){
     await refreshValidationMatrix(env,projectId);
     rows=await matrixRows(env,projectId,currentCycle,currentRev);
   }

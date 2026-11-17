@@ -40,11 +40,31 @@ test('legacy DOI attention task resumes without resetting completed tasks',async
  const c=env.DB.raw.prepare('SELECT status,last_error,cursor,failed_tasks FROM lab_campaigns').get();
  assert.equal(c.status,'active');assert.equal(c.last_error,null);assert.equal(c.cursor,1);assert.equal(c.failed_tasks,0);
 });
+test('an active campaign with legacy DOI error and delayed retry is recovered immediately',async()=>{
+ const env=await makeEnv();await createLabCampaign(env,env.pid);
+ const later=new Date(Date.now()+86400000).toISOString();
+ env.DB.raw.prepare("UPDATE lab_campaigns SET status='active',last_error='Unverified DOI cited: 10.1016/j.chbr.2026.101329',error_count=2,next_run_at=?").run(later);
+ env.DB.raw.prepare("UPDATE lab_tasks SET status='retry',attempts=2,error='Unverified DOI cited' WHERE seq=0").run();
+ const result=await processLabTick(env);
+ assert.equal(result.status,'task_completed');
+ const c=env.DB.raw.prepare('SELECT status,last_error,cursor,completed_tasks FROM lab_campaigns').get();
+ assert.equal(c.status,'active');assert.equal(c.last_error,null);assert.equal(c.cursor,1);assert.equal(c.completed_tasks,1);
+});
+test('live leases are not overwritten by DOI error recovery',async()=>{
+ const env=await makeEnv();await createLabCampaign(env,env.pid);
+ const later=new Date(Date.now()+86400000).toISOString();
+ env.DB.raw.prepare("UPDATE lab_campaigns SET status='active',last_error='Unverified DOI cited: 10.1016/j.chbr.2026.101329',lease_token='other-worker',lease_until=?,next_run_at=?").run(later,later);
+ const result=await processLabTick(env);assert.equal(result.status,'idle');
+ const c=env.DB.raw.prepare('SELECT last_error,lease_token,cursor FROM lab_campaigns').get();
+ assert.match(c.last_error,/Unverified DOI cited/);assert.equal(c.lease_token,'other-worker');assert.equal(c.cursor,0);
+});
 test('deadline display uses campaign deadline and never hard-codes October 30',()=>{
  const labJs=fs.readFileSync(new URL('../public/lab.js',import.meta.url),'utf8');
  assert.doesNotMatch(labJs,/10월 30일 마감/);
  assert.match(labJs,/labDeadlineText\(status\?\.campaign\)/);
  assert.match(labJs,/campaign\.deadline_at/);
+ assert.match(labJs, /:`<div class=\"lab-delivery\"><b>6종 결과물<\/b><p>\$\{esc\(labDeadlineText\(status\?\.campaign\)\)\}/);
+ assert.doesNotMatch(labJs, /:'<div class=\"lab-delivery\"><b>6종 결과물/);
 });
 test('campaign start is idempotent and only materializes one task',async()=>{
  const env=await makeEnv();const result=await createLabCampaign(env,env.pid);const duplicate=await createLabCampaign(env,env.pid);

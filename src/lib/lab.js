@@ -8,20 +8,29 @@ import {buildLabPackage,labReadiness} from './lab_package.js';
 import {earlyManuscriptStatements} from './lab_manuscript_seed.js';
 
 const MAX_ATTEMPTS=3,LEASE_MS=240000;
+// The manuscript deadline is a stop date, not a quota that spreads out research work.
+// One role per tick and a 60-minute minimum interval prevent aggressive quota consumption.
+export const LAB_ACTIVE_CADENCE_MS=60*60*1000;
 const safeConfig=campaign=>safeJson(campaign.config_json);
-const nextTime=(c,cursor)=>new Date(Date.parse(c.starts_at)+(Date.parse(c.deadline_at)-900000-Date.parse(c.starts_at))*cursor/c.total_tasks).toISOString();
+export const nextTime=(c,cursor,now=Date.now())=>{
+ // Never slow daily work merely because the final deadline has been extended.
+ // Existing executions may have a future next_run_at after an older extension.
+ const due=Math.min(now+LAB_ACTIVE_CADENCE_MS,Date.parse(c.deadline_at)-900000);
+ return new Date(Math.max(now,due)).toISOString();
+};
 async function writeBatches(db,statements){for(let i=0;i<statements.length;i+=40)await db.batch(statements.slice(i,i+40));}
 // Extend the deadline and wake a stalled/paused/attention/completed(unfinished) campaign.
-// Remaining tasks are re-paced evenly from now to the new deadline: nextTime() maps cursor onto [starts_at, deadline-15min],
-// so starts_at is solved such that the current cursor lands exactly on "now" (otherwise every missed slot would be due at once).
+// Preserve starts_at, cursor, task histories and finished documents; wake the next task now.
+// Do not revoke a live lease while another Worker owns a task.
 export async function extendLabDeadline(env,c,input={}){
  const deadline=new Date(input.deadline_at||'');
  if(!Number.isFinite(+deadline)||+deadline<=Date.now()+3600000)throw new Error('Deadline must be a valid date at least one hour in the future');
  if(c.cursor>=c.total_tasks)throw new Error('All tasks are already finished; use rebuild to regenerate the package');
- const now=Date.now(),end=+deadline-900000,startsAt=new Date((now*c.total_tasks-end*c.cursor)/(c.total_tasks-c.cursor)).toISOString(),ts=nowIso();
+ if(c.lease_until&&Date.parse(c.lease_until)>Date.now())throw new Error('Research task currently running; retry after its lease expires');
+ const ts=nowIso();
  await env.DB.batch([
-  env.DB.prepare(`UPDATE lab_campaigns SET deadline_at=?,starts_at=?,status='active',error_count=0,last_error=NULL,lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=? WHERE id=?`).bind(deadline.toISOString(),startsAt,ts,ts,c.id),
-  env.DB.prepare(`UPDATE lab_tasks SET status='retry' WHERE campaign_id=? AND seq=? AND status='running'`).bind(c.id,c.cursor)
+  env.DB.prepare(`UPDATE lab_campaigns SET deadline_at=?,status='active',error_count=0,last_error=NULL,lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=? WHERE id=? AND (lease_until IS NULL OR lease_until<?)`).bind(deadline.toISOString(),ts,ts,c.id,ts),
+  env.DB.prepare(`UPDATE lab_tasks SET status='retry' WHERE campaign_id=? AND seq=? AND status='running' AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND status='active' AND deadline_at=?)`).bind(c.id,c.cursor,c.id,deadline.toISOString())
  ]);
  bust(env,c.project_id,'lab:status');
  return {ok:true,deadline_at:deadline.toISOString(),previous_status:c.status,previous_deadline_at:c.deadline_at,cursor:c.cursor,remaining_tasks:c.total_tasks-c.cursor,next_run_at:ts};
@@ -252,6 +261,23 @@ export async function labApi(request,env,projectId,parts){
  if(method==='POST'&&!action)return json(await createLabCampaign(env,projectId,await request.json()),201);
  const c=await one(env.DB,'SELECT * FROM lab_campaigns WHERE project_id=?',[projectId]);if(!c)return json({error:'lab_not_started'},404);
  if(['POST','PUT'].includes(method)&&action==='deadline')return json(await extendLabDeadline(env,c,await request.json()));
+ if(method==='POST'&&action==='finalize'){
+  if(c.status!=='active')return json({error:'campaign_not_active'},409);
+  if(c.lease_until&&Date.parse(c.lease_until)>Date.now())return json({error:'research_task_in_progress'},409);
+  const token=uid('earlyfinal'),now=nowIso(),until=new Date(Date.now()+LEASE_MS).toISOString();
+  const claimed=await one(env.DB,`UPDATE lab_campaigns SET lease_token=?,lease_until=? WHERE id=? AND status='active' AND (lease_until IS NULL OR lease_until<?) RETURNING *`,[token,until,c.id,now]);
+  if(!claimed)return json({error:'research_task_in_progress'},409);
+  try{
+   const snapshot=await readLabSnapshot(env,claimed,{force:true});
+   const inputs=await taskInputs(env,claimed);
+   const readiness=labReadiness(claimed,snapshot,inputs.documents,inputs.sources,inputs.journals,inputs.reviews,inputs.replication);
+   if(readiness.status!=='INTERNAL_REVIEW_COMPLETE')return json({error:'early_finalization_not_ready',blockers:readiness.blockers},409);
+   const result=await persistLabPackage(env,claimed,snapshot,inputs,token);
+   return json({...result,early:true,completed_tasks:claimed.completed_tasks,total_tasks:claimed.total_tasks});
+  }finally{
+   await run(env.DB,`UPDATE lab_campaigns SET lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=?`,[c.id,token]);
+  }
+ }
  if(method==='POST'&&['pause','resume'].includes(action)){
   if(c.status==='completed'&&action==='resume')return json({error:'campaign_completed'},409);
   await run(env.DB,'UPDATE lab_campaigns SET status=?,lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=? WHERE id=?',[action==='pause'?'paused':'active',nowIso(),nowIso(),c.id]);bust(env,projectId,'lab:status');return json({ok:true});

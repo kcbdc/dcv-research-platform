@@ -116,8 +116,19 @@ export async function claimJobs(env, limit=4) {
   if(lane==='worker-hybrid'&&env.EMERGENCY_WORKER_COMPUTE==='1')laneSql=laneSql.replace(/ AND type IN \((.*)\)$/,` AND (type IN ($1) OR type='collect_project')`);
   // An oversized collector must not block smaller compute jobs behind it. In hybrid mode,
   // the same indexed queue is partitioned by job type so Worker and Actions never steal each other's work.
+  // Once a candidate has passed confirmation, process its actual evidence gates
+  // before draining hundreds of unrelated exploration jobs. Keep the priority
+  // within each lane, and never claim a phase that is not already durably queued.
+  // This is scheduling only: no change to scientific PASS/FAIL criteria.
   const laneOrder=lane==='github-hybrid'
-    ? `CASE WHEN type='compute_candidate' THEN 0 WHEN type IN ('validate_project','fit_reviewer') THEN 1 WHEN type IN (${SHARED_FAST_JOB_TYPES.map(x=>`'${x}'`).join(',')}) THEN 3 ELSE 2 END,`
+    ? `CASE
+      WHEN type='compute_candidate' AND phase IN ('historical','stress') THEN 0
+      WHEN type='compute_candidate' AND phase='confirmation' THEN 1
+      WHEN type='compute_candidate' AND phase='refinement' THEN 2
+      WHEN type='compute_candidate' THEN 3
+      WHEN type IN ('validate_project','fit_reviewer') THEN 4
+      WHEN type IN (${SHARED_FAST_JOB_TYPES.map(x=>`'${x}'`).join(',')}) THEN 6
+      ELSE 5 END,`
     : '';
   const jobs = await all(env.DB, `SELECT * FROM jobs INDEXED BY idx_jobs_claim WHERE status='queued' AND run_after<=?${laneSql}
     AND CASE type WHEN 'collect_project' THEN 180 WHEN 'generate_report' THEN 100 WHEN 'advance_project' THEN 90 ELSE 60 END<=?

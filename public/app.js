@@ -303,6 +303,19 @@ async function loadExternalMatrix(){
 }
 const _dcvOpenProjectCore=openProject;
 const auxSnapshotCache=new Map(),auxSnapshotPending=new Map();
+// Figure 7 is a live read-only view. Keep it current while the user is on
+// the dashboard; refresh is independent of expensive simulation scheduling.
+// Avoid overlapping calls and polling in background browser tabs.
+let funnelPollBusy=false;
+if(typeof setInterval==='function')setInterval(async()=>{
+  if(document.hidden||!current||funnelPollBusy)return;
+  const panel=document.getElementById('externalFunnel');
+  if(!panel||!panel.getClientRects().length)return;
+  funnelPollBusy=true;
+  try{await loadExternalMatrix();}catch(_){/* the loader reports API errors */}
+  finally{funnelPollBusy=false;}
+},20000);
+
 function scheduleProjectAux(d,force=false){
   if(!d?.project)return;
   const id=d.project.id,cycle=Number(d.project.research_cycle||1),rev=Number(d.project.evidence_revision||0);

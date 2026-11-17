@@ -3,6 +3,8 @@ const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>
 let status=null,pollTimer=null,controller=null,activeProject=null,etag='',loading=false,selectedRole='leader';
 const stateLabel={active:'자동 연구 진행',paused:'일시 중지',attention:'확인 필요',completed:'패키지 생성 완료',pending:'대기',running:'작업 중',done:'완료',retry:'재시도 대기',failed:'확인 필요'};
 const date=s=>s?new Date(s).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'—';
+// All deadline displays share the same server-provided campaign deadline.
+const labDeadlineText=campaign=>campaign?.deadline_at&&Number.isFinite(Date.parse(campaign.deadline_at))?'마감일 '+date(campaign.deadline_at)+'에':'연구 완료 후';
 function headers(){const token=window.DCV?.token();return token?{authorization:'Bearer '+token}:{};}
 function path(action=''){return `/api/projects/${encodeURIComponent(activeProject)}/lab${action?'/'+action:''}`;}
 function ensureLab(){
@@ -48,7 +50,7 @@ async function showDesk(id,loadReview=false){
  $('#labDeskContent').innerHTML=`<p>${esc(role.mission)}</p><div class="lab-desk-log">${esc(role.activity?.summary||role.activity?.error||'아직 실행된 작업이 없습니다.')}</div>`;
  if(id!=='leader')return;
  const pkg=status.package;
- $('#labDeskContent').insertAdjacentHTML('beforeend',pkg?`<div class="lab-delivery"><b>${esc(pkg.status==='INTERNAL_REVIEW_COMPLETE'?'내부 검토 완료':'보완이 필요한 초안 패키지')}</b><p>${(pkg.size_bytes/1024).toFixed(0)} KB · ${esc(date(pkg.created_at))}</p><button class="btn-future" id="labDownload">6종 결과물 ZIP 받기</button><button class="btn-ghost" id="labRebuild">설정 반영 후 ZIP 재생성</button><small>실제 저자 검토 후 투고 · 저널 게재승인 여부는 별도</small></div>`:'<div class="lab-delivery"><b>6종 결과물</b><p>10월 30일 마감 시 서버에 저장됩니다.<br>완료 전에는 아래 초안과 검토 항목을 확인할 수 있습니다.</p></div>');
+ $('#labDeskContent').insertAdjacentHTML('beforeend',pkg?`<div class="lab-delivery"><b>${esc(pkg.status==='INTERNAL_REVIEW_COMPLETE'?'내부 검토 완료':'보완이 필요한 초안 패키지')}</b><p>${(pkg.size_bytes/1024).toFixed(0)} KB · ${esc(date(pkg.created_at))}</p><button class="btn-future" id="labDownload">6종 결과물 ZIP 받기</button><button class="btn-ghost" id="labRebuild">설정 반영 후 ZIP 재생성</button><small>실제 저자 검토 후 투고 · 저널 게재승인 여부는 별도</small></div>`:'<div class="lab-delivery"><b>6종 결과물</b><p>${esc(labDeadlineText(status?.campaign))} 서버에 저장됩니다.<br>완료 전에는 아래 초안과 검토 항목을 확인할 수 있습니다.</p></div>');
  if(pkg){$('#labDownload').onclick=download;$('#labRebuild').onclick=()=>action('rebuild',{});}
  if(loadReview&&status.campaign){try{const r=await fetch(path('review'),{headers:headers(),cache:'no-store'});const data=await r.json();if(r.ok&&selectedRole==='leader'){$('#labReplayForm').elements.data_digest.value=data.data_digest||'';}if(r.ok&&selectedRole==='leader')$('#labDeskContent').insertAdjacentHTML('beforeend',`<h4>최종 검토 항목</h4><ul class="lab-blockers">${data.blockers.map(b=>'<li>'+esc(b)+'</li>').join('')}</ul>`);}catch(e){notice(e.message,true);}}
 }

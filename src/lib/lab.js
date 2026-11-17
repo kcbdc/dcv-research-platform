@@ -90,6 +90,22 @@ export async function persistLabPackage(env,c,snapshot,inputs,leaseToken){
 }
 
 export async function processLabTick(env){
+ // Upgrade recovery: legacy versions treated an unlisted AI-suggested DOI as
+ // a fatal content error and could leave the campaign in attention forever.
+ // Reopen only an unfinished, unlocked DOI-blocked task; do not rewrite prior
+ // successful/failed tasks or mark an unverified citation as verified.
+ const doiErrorSql="(last_error LIKE 'Unverified DOI cited:%' OR last_error='Unknown DOI in AI output')";
+ await env.DB.batch([
+  env.DB.prepare(`UPDATE lab_tasks SET status='retry',attempts=0,error=NULL
+    WHERE status IN ('retry','running','pending') AND EXISTS (
+      SELECT 1 FROM lab_campaigns c WHERE c.id=lab_tasks.campaign_id
+      AND c.status='attention' AND c.cursor=lab_tasks.seq AND c.cursor<c.total_tasks
+      AND (c.lease_until IS NULL OR c.lease_until<?) AND ${doiErrorSql})`).bind(nowIso()),
+  env.DB.prepare(`UPDATE lab_campaigns SET status='active',error_count=0,last_error=NULL,
+    next_run_at=?,lease_token=NULL,lease_until=NULL,updated_at=?
+    WHERE status='attention' AND cursor<total_tasks
+    AND (lease_until IS NULL OR lease_until<?) AND ${doiErrorSql}`).bind(nowIso(),nowIso(),nowIso())
+ ]);
  // A research-foundation HOLD is expected scientific state, not an operational failure.
  // Older builds escalated four HOLD retries to `attention`, which stopped the scheduler forever.
  const recoverAt=nowIso();

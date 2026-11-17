@@ -63,10 +63,19 @@ export async function advanceProject(env,projectId){
   if(!p||!p.auto_run) return {status:'disabled'};
   // 보고서까지 끝난 프로젝트: 이후 단계 점검 쿼리(전체 스캔 포함)를 전부 생략
   if(TERMINAL_STATUSES.has(p.status)) {
-    const pending=await one(env.DB,`SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending' LIMIT 1`,[projectId,Number(p.research_cycle||1)]);
-    if(!pending)return {stage:'complete'};
+    const cycle=Number(p.research_cycle||1),revision=Number(p.evidence_revision||0);
+    const pending=await one(env.DB,`SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending' LIMIT 1`,[projectId,cycle]);
+    // A completed older revision must not suppress newly required historical/stress
+    // work. This checks the actual current-revision evidence rather than a cached
+    // project status. Do not reopen merely because Human observations are missing:
+    // human collection requires real participant evidence, never synthetic PASS.
+    const missingRobust=!pending?await one(env.DB,`SELECT 1 x FROM design_candidates c
+      WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible'
+        AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='historical' AND r.evidence_revision=?)
+          OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='stress' AND r.evidence_revision=?)) LIMIT 1`,[projectId,cycle,revision,revision]):null;
+    if(!pending&&!missingRobust)return {stage:'complete'};
     await run(env.DB,`UPDATE projects SET status='running',reviewer_hold_marker=NULL WHERE id=?`,[projectId]);
-    p.reviewer_hold_marker=null;
+    p.status='running';p.reviewer_hold_marker=null;
   }
 
   // 인간 검토자 표본을 기다리는 중(마지막 fit_reviewer 가 HOLD 였고 그 뒤 새 관측이 없음)이면,
@@ -122,7 +131,7 @@ export async function advanceProject(env,projectId){
 
   // 이전: simulation_runs 를 phase 별로 3번, validations 를 3번 — 모두 project_id 인덱스가 없어 전체 스캔.
   // 이후: 커버링 인덱스로 GROUP BY 1회씩.
-  const runAgg=await all(env.DB,`SELECT r.phase,COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('historical','stress') GROUP BY r.phase`,[projectId,cycle]);
+  const runAgg=await all(env.DB,`SELECT r.phase,COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('historical','stress') GROUP BY r.phase`,[projectId,cycle,rev]);
   const rn=Object.fromEntries(runAgg.map(r=>[r.phase,Number(r.n||0)]));
   const recomputeNow=await one(env.DB,`SELECT COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase='recompute' AND r.evidence_revision=?`,[projectId,cycle,rev]);
   rn.recompute=Number(recomputeNow?.n||0);
@@ -136,7 +145,11 @@ export async function advanceProject(env,projectId){
       // counter is stale (e.g. duplicated legacy triggers double-counted it). Waiting here would
       // re-enter this branch on every tick forever and never reach validate_project, the
       // External Validation Matrix or human review, so repair the cache and continue instead.
-      if(!queuedRobust){ await repairCycleStats(env,projectId,cycle); robustGate=false; }
+      if(!queuedRobust){
+        await repairCycleStats(env,projectId,cycle);
+        const stillMissing=await one(env.DB,`SELECT 1 x FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='historical' AND r.evidence_revision=?) OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='stress' AND r.evidence_revision=?)) LIMIT 1`,[projectId,cycle,rev,rev]);
+        robustGate=!!stillMissing;
+      }
     }
     if(robustGate){
       await setStage(env,p,'validate');
@@ -270,7 +283,10 @@ export async function scheduleAll(env,{process=true}={}){
     EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND COALESCE(s.next_fetch_at,'1970-01-01T00:00:00.000Z')<=?) due,
     EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='collect_project' AND j.status IN ('queued','running')) collecting
     FROM projects p LEFT JOIN project_cycle_stats cs ON cs.project_id=p.id AND cs.research_cycle=p.research_cycle
-    WHERE p.auto_run=1 AND (p.status NOT IN ('complete','report_ready') OR COALESCE(cs.candidate_pending,0)>0)
+    WHERE p.auto_run=1 AND (p.status NOT IN ('complete','report_ready') OR COALESCE(cs.candidate_pending,0)>0
+      OR EXISTS(SELECT 1 FROM design_candidates c WHERE c.project_id=p.id AND c.research_cycle=p.research_cycle
+        AND c.status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='historical' AND r.evidence_revision=p.evidence_revision)
+          OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='stress' AND r.evidence_revision=p.evidence_revision))))
     AND (NOT EXISTS(SELECT 1 FROM jobs a WHERE a.project_id=p.id AND a.type='advance_project' AND a.status IN ('queued','running'))
       OR (NOT EXISTS(SELECT 1 FROM jobs b WHERE b.project_id=p.id AND b.type='collect_project' AND b.status IN ('queued','running'))
         AND EXISTS(SELECT 1 FROM data_sources d WHERE d.project_id=p.id AND d.enabled=1 AND COALESCE(d.next_fetch_at,'1970-01-01T00:00:00.000Z')<=?)))

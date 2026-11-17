@@ -449,10 +449,10 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   return{id,phase,cycle,seed,classification:ev.classification,boundary_score:ev.boundary_score,...m};
 }
 export async function enqueueRobustValidation(env,projectId){
-  const proj=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
-  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='historical') OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='stress')) ORDER BY boundary_score DESC LIMIT 500`,[projectId,cycle]);
+  const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1),rev=Number(proj?.evidence_revision||0);
+  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='historical' AND r.evidence_revision=?) OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='stress' AND r.evidence_revision=?)) ORDER BY boundary_score DESC LIMIT 500`,[projectId,cycle,rev,rev]);
   // 후보마다 'SELECT DISTINCT phase' 를 날리던 N+1 루프 → 프로젝트 단위 1회 조회(커버링 인덱스)
-  const doneRows=await all(env.DB,`SELECT DISTINCT r.candidate_id,r.phase FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('historical','stress')`,[projectId,cycle]);
+  const doneRows=await all(env.DB,`SELECT DISTINCT r.candidate_id,r.phase FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('historical','stress')`,[projectId,cycle,rev]);
   const done=new Set(doneRows.map(r=>`${r.candidate_id}|${r.phase}`));
   const hist=[],stress=[];
   for(const c of cands){

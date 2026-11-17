@@ -11,7 +11,7 @@ export async function approveProject(env,projectId){
   const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
   const cand=await one(env.DB,`SELECT c.*,v.result_json FROM design_candidates c JOIN validations v ON v.candidate_id=c.id WHERE c.project_id=? AND c.research_cycle=? AND v.evidence_revision=? AND v.validation_type='human_recompute' AND v.status='CONFIRM' ORDER BY COALESCE(c.max_regret,999999) ASC, c.authority_k DESC, c.sigma DESC LIMIT 1`,[projectId,cycle,rev]);
   if(!cand){await audit(env,projectId,'agent','approve.hold','project',projectId,{reason:'no_human_confirmed_candidate'});return{decision:'HOLD'};}
-  const robust=await one(env.DB,`SELECT result_json FROM validations WHERE candidate_id=? AND validation_type='robust' AND status='CONFIRM' ORDER BY created_at DESC LIMIT 1`,[cand.id]);
+  const robust=await one(env.DB,`SELECT result_json FROM validations WHERE candidate_id=? AND evidence_revision=? AND validation_type='robust' AND status='CONFIRM' ORDER BY created_at DESC LIMIT 1`,[cand.id,rev]);
   const reviewer=await one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
   const empirical=await empiricalReadiness(env,projectId),cal=await loadEmpiricalCalibration(env,projectId),protocol=await latestProtocol(env,projectId);
   const doctoralRigor=await assessDoctoralRigor(env,projectId);

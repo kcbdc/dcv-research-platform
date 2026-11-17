@@ -403,6 +403,13 @@ async function priorAggregate(env,candidateId,phase){
   const marks=phases.map(()=>'?').join(','); const rows=await all(env.DB,`SELECT result_json FROM simulation_runs WHERE candidate_id=? AND phase IN (${marks}) ORDER BY created_at`,[candidateId,...phases]);
   const a=emptyAgg(); for(const r of rows){const j=safeJson(r.result_json,{});if(j.raw)mergeAgg(a,j.raw);} return a;
 }
+// Historical/stress outcomes are scoped to the evidence revision. Exploration and
+// confirmation remain frozen-protocol units to preserve their existing identity.
+export function simulationUnitId(candidateId,phase,cycle,evidenceRevision){
+  const suffix=['historical','stress','recompute'].includes(phase)
+    ? `rev_${Number(evidenceRevision||0)}` : 'protocol';
+  return `sim_unit_${candidateId}_${phase}_${cycle}_${suffix}`;
+}
 function nForPhase(config,phase){ if(phase==='exploration')return config.exploration_n;if(phase==='refinement')return config.refinement_n;if(phase==='confirmation')return config.confirmation_n;return config.robust_n; }
 export async function computeCandidate(env,projectId,candidateId,phase='exploration',cycle=0){
   if(['github-actions','hybrid'].includes(env.COMPUTE_EXECUTOR)&&env.EXTERNAL_RUNTIME!=='github-actions')throw new Error('compute_requires_github_actions');
@@ -422,7 +429,7 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   // Selection is no longer performed under an ideal reviewer. Before a qualified human model exists, a preregistered degraded-reviewer condition is used; once fitted, the current-revision human model is used in every phase.
   let reviewer=fittedReviewer||degradedReviewer;
   const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal,replicationSnapshot); const scenarios=(config.replication_mode==='independent_replication_v1'&&['confirmation','recompute'].includes(phase)&&config.replication_scenario_mode==='deterministic_holdout_perturbation_v1')?replicationHoldoutScenarios(scenarioPack.scenarios,config.replication_scenario_salt):scenarioPack.scenarios; const seedNamespace=config.replication_mode==='independent_replication_v1'?`${projectId}|replication|${config.replication_seed_salt||'unsalted'}`:projectId; const seed=deterministicSeed(seedNamespace,c.pair_seed_key||candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
-  const id=`sim_unit_${candidateId}_${phase}_${cycle}_${phase==='recompute'?projectRev:'protocol'}`,saved=await one(env.DB,`SELECT result_json FROM simulation_runs WHERE id=?`,[id]);
+  const id=simulationUnitId(candidateId,phase,cycle,projectRev),saved=await one(env.DB,`SELECT result_json FROM simulation_runs WHERE id=?`,[id]);
   const batch=emptyAgg(),baseline=emptyAgg();if(!saved)for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length],episodeSeed=hashString(seed+'|'+i);addEpisode(batch,simulateEpisode(c,constraints,mulberry32(episodeSeed),sc,reviewer,config,mulberry32(episodeSeed^0x5a5a)),sc.key,sc.validation_group||null);if(config.noninferiority)addEpisode(baseline,simulateEpisode({...c,authority_k:0},constraints,mulberry32(episodeSeed),sc,reviewer,config,mulberry32(episodeSeed^0x5a5a)),sc.key,sc.validation_group||null);}
   let combined=batch; if(!saved&&['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
   const confirmatory=['confirmation','historical','stress','recompute'].includes(phase);
@@ -467,31 +474,35 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
 }
 export async function enqueueRobustValidation(env,projectId){
   const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1),rev=Number(proj?.evidence_revision||0);
-  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='historical' AND r.evidence_revision=?) OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='stress' AND r.evidence_revision=?)) ORDER BY boundary_score DESC LIMIT 500`,[projectId,cycle,rev,rev]);
-  // 후보마다 'SELECT DISTINCT phase' 를 날리던 N+1 루프 → 프로젝트 단위 1회 조회(커버링 인덱스)
-  const doneRows=await all(env.DB,`SELECT DISTINCT r.candidate_id,r.phase FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('historical','stress')`,[projectId,cycle,rev]);
-  const done=new Set(doneRows.map(r=>`${r.candidate_id}|${r.phase}`));
+  const cands=await all(env.DB,`SELECT id,
+    NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='historical' AND r.evidence_revision=?) need_historical,
+    NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='stress' AND r.evidence_revision=?) need_stress
+    FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible'
+    AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='historical' AND r.evidence_revision=?)
+      OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='stress' AND r.evidence_revision=?))
+    ORDER BY c.boundary_score DESC LIMIT 500`,[rev,rev,projectId,cycle,rev,rev]);
+  // Indexed candidate/phase checks avoid loading all historic results over D1 REST.
   // Confirmation can enqueue gates before all candidates finish. Never queue the
   // same in-flight phase again when advanceProject later performs its batch sweep.
   const inFlight=await all(env.DB,`SELECT json_extract(payload_json,'$.candidate_id') candidate_id,phase FROM jobs
     WHERE project_id=? AND type='compute_candidate' AND phase IN ('historical','stress')
       AND status IN ('queued','running') AND CAST(json_extract(payload_json,'$.evidence_revision') AS INTEGER)=?`,[projectId,rev]);
   const busy=new Set(inFlight.map(j=>`${j.candidate_id}|${j.phase}`));
-  const hist=[],stress=[];
+  const next=[];
   for(const c of cands){
-    if(!done.has(`${c.id}|historical`)&&!busy.has(`${c.id}|historical`))hist.push({candidate_id:c.id,phase:'historical',cycle:0,evidence_revision:rev});
-    if(!done.has(`${c.id}|stress`)&&!busy.has(`${c.id}|stress`))stress.push({candidate_id:c.id,phase:'stress',cycle:0,evidence_revision:rev});
+    if(c.need_historical&&!busy.has(`${c.id}|historical`))next.push({candidate_id:c.id,phase:'historical',cycle:0,evidence_revision:rev});
+    if(c.need_stress&&!busy.has(`${c.id}|stress`))next.push({candidate_id:c.id,phase:'stress',cycle:0,evidence_revision:rev});
   }
   // 작업당 INSERT+큐 전송 1회씩 하던 것을 배치로
-  await enqueueMany(env,projectId,'compute_candidate',[...hist,...stress],50);
-  return{queued:hist.length+stress.length,candidates:cands.length};
+  await enqueueMany(env,projectId,'compute_candidate',next,50);
+  return{queued:next.length,candidates:cands.length};
 }
 export async function computeRegretTable(env,projectId,preloadedRuns=null){
-  const proj=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
+  const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1),rev=Number(proj?.evidence_revision||0);
   const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible'`,[projectId,cycle]);
   const confirmedIds=new Set(cands.map(c=>c.id));
   // 후보마다 simulation_runs 를 따로 조회하던 N+1 루프 → 프로젝트 단위 1회 조회(호출자가 이미 읽었으면 재사용)
-  const runs=preloadedRuns||await all(env.DB,`SELECT candidate_id,phase,result_json FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress') ORDER BY created_at DESC`,[projectId]);
+  const runs=preloadedRuns||await all(env.DB,`SELECT candidate_id,phase,result_json FROM simulation_runs WHERE project_id=? AND evidence_revision=? AND phase IN ('historical','stress') ORDER BY created_at DESC`,[projectId,rev]);
   const latestBy=new Map(); for(const r of runs){ if(!confirmedIds.has(r.candidate_id)||(r.phase!=='historical'&&r.phase!=='stress'))continue; let m=latestBy.get(r.candidate_id); if(!m){m={};latestBy.set(r.candidate_id,m);} if(!m[r.phase])m[r.phase]=safeJson(r.result_json,{}); }
   const rows=cands.map(c=>({id:c.id,latest:latestBy.get(c.id)||{}}));
   const complete=rows.filter(r=>['historical','stress'].every(ph=>Object.keys(r.latest[ph]?.scenario_scores||{}).length));

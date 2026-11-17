@@ -6,7 +6,7 @@ import { all, one, run, enqueue, enqueueOnce, audit } from './lib/db.js';
 import { bust } from './lib/memo.js';
 import { processJobs, processFastLane, scheduleAll, advanceProject } from './lib/orchestrator.js';
 import { dispatchGithubActionsIfNeeded, githubRunnerStatus } from './lib/github_dispatch.js';
-import { generateReport, upgradeStoredReport, patchLiveHumanChecklist, patchLiveOfficialTable, patchLiveHumanPool, patchLegacyMatrixLabels } from './lib/report.js';
+import { generateReport, upgradeStoredReport, patchLiveHumanChecklist, patchLiveOfficialTable, patchLiveHumanPool, patchLegacyMatrixLabels, patchLiveMatrixTable } from './lib/report.js';
 import { buildThesisData, exportCsv, EXPORT_NAMES } from './lib/thesis.js';
 import { aiJson } from './lib/ai.js';
 import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration, seedBundledEmpiricalPanel } from './lib/empirical.js';
@@ -382,12 +382,13 @@ async function api(request,env,ctx=null){
 > 아래 본문의 수치·표는 보고서 작성 당시의 증거 스냅샷(Cycle ${r?.research_cycle||'-'} · Evidence r${r?.evidence_revision??'-'})입니다.${stale?' 현재 보고서는 이전 증거 스냅샷이며 최신 보고서 재생성을 자동 요청했습니다.':''} 단, 논문 사용 전 점검 사항의 인간 참가자 현황은 현재 DB 상태를 반영해 표시합니다.
 
 `;
+      const matrixLive=(!stale&&r)?await buildThesisData(env,projectId).then(x=>x.validation_matrix).catch(()=>null):null;
       const md=r?patchLegacyMatrixLabels(patchLiveOfficialTable(patchLiveHumanPool(patchLiveHumanChecklist(r.content_markdown,{
         ...liveHuman,
         publication_participants:livePool?.enabled?Number(livePool.poolable_total||0):liveHuman.publication_participants,
         min_participants:minHuman
       }),livePool),liveOfficial)):'';
-      return r?json({...r,stale,live_human:liveHuman,live_pool:livePool,live_official:liveOfficial,current_cycle:Number(p?.research_cycle||1),current_revision:Number(p?.evidence_revision||0),content_markdown:liveNotice+md,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
+      return r?json({...r,stale,live_human:liveHuman,live_pool:livePool,live_official:liveOfficial,current_cycle:Number(p?.research_cycle||1),current_revision:Number(p?.evidence_revision||0),content_markdown:liveNotice+(!stale?patchLiveMatrixTable(md,matrixLive):md),data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
     }
     if(parts[3]==='report' && method==='POST'){ if(['github-actions','hybrid'].includes(env.COMPUTE_EXECUTOR)){await enqueueOnce(env,projectId,'generate_report',{},95);return json({status:'queued',transport:'github-actions'},202);} return json(await generateReport(env,projectId)); }
     if(parts[3]==='thesis' && method==='GET'){ try{ return json(await buildThesisData(env,projectId)); }catch(e){ return json({error:String(e.message||e)},e.message==='project_not_found'?404:500); } }

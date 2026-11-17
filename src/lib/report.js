@@ -10,7 +10,7 @@ const pct = (v, d = 1) => (v == null || !Number.isFinite(Number(v))) ? '-' : `${
 const cip = o => (!o || !o.n) ? '-' : `${pct(o.p)} [${pct(o.lo)}, ${pct(o.hi)}] (${o.k}/${o.n})`;
 const cleanTex = s => String(s ?? '').replace(/\\\((.*?)\\\)/g, '$1').replace(/\\sigma/g, 'σ').replace(/\\alpha/g, 'α').replace(/\\tau/g, 'τ').replace(/\\delta/g, 'δ').replace(/\\([A-Za-z]+)/g, '$1');
 const cell = v => String(v ?? '-').replace(/\|/g, '/').replace(/\n/g, ' ');
-const mdTable = (head, rows) => `| ${head.join(' | ')} |\n|${head.map(() => '---').join('|')}|\n${rows.map(r => `| ${r.map(cell).join(' | ')} |`).join('\n')}`;
+const mdTable = (head, rows) => `| ${head.join(' | ')} |\n|${head.map(() => '---').join('|')}|\n${rows.map(r => `| ${head.map((_,i)=>cell(r[i])).join(' | ')} |`).join('\n')}`;
 const arr = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x : JSON.stringify(x)).filter(Boolean) : (v ? [String(v)] : []);
 const EST = { ema: 'EMA', kalman: 'Kalman', changepoint: 'Change-point', adaptive: 'Adaptive' };
 const estName = e => EST[e] || e;
@@ -40,7 +40,7 @@ export function patchLiveOfficialTable(markdown,official={}){
   if(!sources.length)return String(markdown||'');
   const rows=sources.map(x=>{
     const cov=x.coverage||{},count=Number(cov.rows||0);
-    let status=count>0?(x.using_cached_data?'이전 수집자료 유지':x.readiness==='ok'?'수집 완료':'수집자료 보유'):'수집 대기';
+    let status=count>0?(x.using_cached_data?'이전 수집자료 유지':x.readiness==='ok'?'수집 완료':String(x.readiness||'').startsWith('partial:')?'수집 진행 중 (다음 페이지 대기)':'수집자료 보유'):'수집 대기';
     if(x.readiness==='DISABLED')status='비활성';
     else if(x.readiness==='SECRET_MISSING')status='인증정보 확인 필요';
     else if(x.readiness==='CONFIG_REQUIRED')status='설정 필요';
@@ -59,6 +59,27 @@ export function patchLiveOfficialTable(markdown,official={}){
   for(const line of lines){if(!line.trim().startsWith('|'))break;end+=line.length+1;}
   const lead='\n\n> 최신 DB 연결현황 (현재 조회 시점). 아래 표만 최신 수집 상태이며, 다른 분석 결과는 보고서 생성 당시 스냅샷입니다.\n\n';
   return text.slice(0,ix+heading.length)+lead+table+text.slice(end);
+}
+
+// Replace only the saved report's legacy 9B table with current-cycle D1-backed
+// candidate metrics. Other archived sections are left untouched.
+export function patchLiveMatrixTable(markdown,vm){
+  const source=String(markdown||'');
+  if(!vm?.rows?.length)return source;
+  const heading=/\*\*표 9B\.[^\n]*\*\*/;
+  const hit=heading.exec(source);if(!hit)return source;
+  const start=source.indexOf('\n|',hit.index+hit[0].length);
+  if(start<0)return source;
+  const lines=source.slice(start+1).split('\n');
+  let end=start;
+  for(const line of lines){if(!line.trim().startsWith('|'))break;end+=line.length+1;}
+  const rows=vm.rows.slice(0,20).map(r=>[
+    r.label, ...['historical','synthetic','adversarial','bis','ecb','human'].map(k=>matrixEvidenceCell(r.statuses?.[k])),
+    `${Number(r.survived_count||0)}/${Number(r.available_count||0)}`
+  ]);
+  const table=mdTable(['후보','Historical','Synthetic','Adversarial','BIS','ECB','Human','Score'],rows);
+  const note='\n\n> 최신 D1 검증자료 기반 표 9B (현재 연구주기/증거 revision). 검증되지 않은 항목은 통과로 간주하지 않습니다.\n\n';
+  return source.slice(0,hit.index)+ '**표 9B. 대표 후보 External Validation Matrix (상위 20행 · 실측지표/판정)**'+note+table+source.slice(end);
 }
 
 export function patchLiveHumanPool(markdown,pool={}){

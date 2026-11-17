@@ -109,7 +109,7 @@ export async function buildThesisData(env, projectId) {
   const cands = candRows.map(c => ({ id: c.id, design_key:c.design_key||null, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), base_id:c.base_id,role:c.candidate_role||'exploratory',K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
 
   // simulation_runs 는 한 번만 읽는다(이전: 이 조회 + 단계별 집계 조회로 2회 스캔). decisions 는 단계별 집계용으로 함께 꺼낸다.
-  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.seed,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.result_json,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates dc ON dc.id=r.candidate_id WHERE r.project_id=? AND dc.research_cycle=? ORDER BY r.created_at`, [projectId,cycle]);
+  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.seed,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.result_json,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates dc ON dc.id=r.candidate_id WHERE r.project_id=? AND dc.research_cycle=? AND r.evidence_revision=? ORDER BY r.created_at`, [projectId,cycle,rev]);
   const best = new Map(), byCandPhase = new Map();
   for (const r of runRows) {
     byCandPhase.set(`${r.candidate_id}|${r.phase}`, r);
@@ -179,7 +179,7 @@ export async function buildThesisData(env, projectId) {
     return {
       rank: i + 1,
       candidate_id: c.id,
-      label: `${String(c.estimator || 'ema').toUpperCase()} · σ=${c.sigma} · α=${c.alpha} · K=${c.K}`,
+      label: `${String(c.estimator || 'ema').toUpperCase()} · σ=${c.sigma} · α=${c.alpha} · K=${c.K} · d=${c.d} · W=${c.W} · m=${c.m}`,
       short_label: `#${i + 1}`,
       sigma: c.sigma, alpha: c.alpha, K: c.K, d: c.d, W: c.W, m: c.m, estimator: c.estimator,
       klass: c.klass, max_regret: c.max_regret, boundary_score: c.boundary_score,

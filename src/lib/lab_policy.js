@@ -42,53 +42,24 @@ export function journalAssessment(rows,years,target=''){
  for(const c of candidates)c.eligible=c.years.every(y=>y.pass);
  return {rule:'Each of the latest three configured metric years: SCIE/SSCI and (Q1/Q2 or AIS >= 0.75)',candidates,eligible:candidates.some(c=>c.eligible)};
 }
-// A DOI can exist on the publisher site without being included in this campaign's
-// verified lab_sources. Quarantine such references, never fabricate verification.
 export function stripUnverifiedDois(value,allowed){
- const known=new Set([...allowed].map(x=>String(x).trim().toLowerCase()));
  const removed=new Set();
- const doiPattern=/10\.\d{4,9}\/[A-Za-z0-9._;()/:+-]+/gi;
- const clean=str=>{
-  // Remove unknown explicit reference markers as a whole. Do not let the
-  // subsequent DOI scrubber interpret the marker a second time.
-  let result=str.replace(/\[SRC:([^\]]+)\]/gi,(match,raw)=>{
-   const doi=String(raw).trim().toLowerCase();
-   if(known.has(doi))return match;
-   removed.add(doi);return '[unverified citation removed]';
-  });
-  result=result.replace(doiPattern,match=>{
-   const doi=match.replace(/[).,;]+$/,'').toLowerCase();
-   if(known.has(doi))return match;
-   removed.add(doi);
-   const tail=match.slice(doi.length);
-   return '[unverified DOI removed]'+tail;
-  });
-  return result;
- };
- // Don't mutate the original output while validating, and don't transform
- // incidental JSON keys (only model-produced string values).
- const walk=v=>{
-  if(Array.isArray(v))return v.map(walk);
-  if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([key,item])=>[key,walk(item)]));
-  return typeof v==='string'?clean(v):v;
- };
- const cleaned=walk(value);
- if(value&&typeof value==='object'){
-  for(const key of Object.keys(value))delete value[key];
-  Object.assign(value,cleaned);
- }
- return [...removed].slice(0,20);
+ const clean=str=>str
+  .replace(/\[SRC:([^\]]+)\]/g,(m,d)=>allowed.has(String(d).trim().toLowerCase())?m:(removed.add(String(d).trim()),'[unverified citation removed]'))
+  .replace(/10\.\d{4,9}\/[A-Za-z0-9._;()/:+-]+/g,m=>{const d=m.replace(/[).,;]+$/,'').toLowerCase();return allowed.has(d)||allowed.has(m.toLowerCase())?m:(removed.add(m.replace(/[).,;]+$/,'')),'[unverified DOI removed]');});
+ const walk=v=>{if(Array.isArray(v)){for(let i=0;i<v.length;i++){if(typeof v[i]==='string')v[i]=clean(v[i]);else walk(v[i]);}}else if(v&&typeof v==='object'){for(const k of Object.keys(v)){if(typeof v[k]==='string')v[k]=clean(v[k]);else walk(v[k]);}}};
+ walk(value);return [...removed].slice(0,20);
 }
 export function validateLabOutput(output,role,sources){
  if(!output||typeof output.summary!=='string'||!output.summary.trim())throw new Error('AI output missing summary');
  // Models sometimes cite a DOI that was not in the verified source list. Failing the whole task wastes a day of work, so the
  // unverified citation is stripped from every string field and reported as a blocker instead; unverified DOIs never reach documents.
- const removed=stripUnverifiedDois(output,new Set(sources.map(s=>String(s.doi||'').trim().toLowerCase()).filter(Boolean)));
- if(removed.length){output.blockers=[...(Array.isArray(output.blockers)?output.blockers:[]),'Unverified literature citation(s) removed: '+removed.length+' not present in this campaign\'s verified source list.'];}
+ const removed=stripUnverifiedDois(output,new Set(sources.map(s=>s.doi.toLowerCase())));
+ if(removed.length){output.blockers=[...(Array.isArray(output.blockers)?output.blockers:[]),...removed.map(d=>'Unverified citation(s) removed: '+d.replace('/','[/]'))];}
  const serialized=JSON.stringify(output);
  if(serialized.length>24000)throw new Error('AI output exceeds bounded task size');
  if(/[가-힣]/.test(output.summary))throw new Error('Research output must be English');
- const allowed=new Set(sources.map(s=>String(s.doi||'').trim().toLowerCase()).filter(Boolean));
+ const allowed=new Set(sources.map(s=>s.doi.toLowerCase()));
  for(const m of serialized.matchAll(/\[SRC:([^\]]+)\]/g))if(!allowed.has(m[1].toLowerCase()))throw new Error('Unverified DOI cited: '+m[1]);
  for(const m of serialized.matchAll(/10\.\d{4,9}\/[A-Za-z0-9._;()/:+-]+/g)){
   const doi=m[0].replace(/[).,;]+$/,'').toLowerCase();

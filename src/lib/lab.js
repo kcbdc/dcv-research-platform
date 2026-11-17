@@ -5,6 +5,7 @@ import {extractJson} from './ai.js';
 import {LAB_ROLES,MANUSCRIPT_SECTIONS,DEFAULT_DEADLINE,makeLabPlan,normalizeConfig,writingSection,validateJournalRow,validateLabOutput} from './lab_policy.js';
 import {readLabSnapshot,promptEvidence,collectLabLiterature} from './lab_evidence.js';
 import {buildLabPackage,labReadiness} from './lab_package.js';
+import {earlyManuscriptStatements} from './lab_manuscript_seed.js';
 
 const MAX_ATTEMPTS=3,LEASE_MS=240000;
 const safeConfig=campaign=>safeJson(campaign.config_json);
@@ -62,16 +63,16 @@ async function inferLabTask(env,c,t,snapshot,inputs){
  const inputsCompact={phase:t.phase,day:t.day,deadline:c.deadline_at,assigned_section:role.id==='writer'?section:null,
   journal_policy:{years:config.metric_years,target:config.target_journal},authors:config.authors,declarations:{ethics:config.ethics_statement,funding:config.funding,conflicts:config.conflicts},
   evidence:promptEvidence(snapshot),references:inputs.sources.map(r=>({doi:r.doi,title:r.title,authors:safeJson(r.authors_json),journal:r.journal,year:r.published_year,abstract:r.abstract,full_text_verified:config.full_text_verified_dois.includes(r.doi)})),
-  previous_reviews:inputs.reviews.map(r=>({role:r.role_id,summary:r.summary,blockers:safeJson(r.output_json).blockers||[]})),
+  previous_reviews:inputs.reviews.slice(0,5).map(r=>({role:r.role_id,summary:r.summary,blockers:(safeJson(r.output_json).blockers||[]).slice(0,3)})),
   previous_section:(inputs.documents.find(d=>d.section===section)?.markdown||'').slice(0,10000),
   manuscript_for_review:role.id==='writer'?undefined:inputs.documents.filter(d=>MANUSCRIPT_SECTIONS.includes(d.section)).map(d=>({section:d.section,markdown:d.markdown.slice(0,1800),signature:d.evidence_signature})),
   instructions:role.id==='writer'?`Write a complete 550–900 word ${section} section (abstract 180–250 words). Revise rather than append. Use explicit limitations. Subsequent passes must address prior reviews. Do not duplicate the section heading. Always put the full section text in the "markdown" field, even when evidence is incomplete: write only what the supplied evidence supports and state each gap as an explicit limitation inside the text. Never return empty or placeholder markdown.`:
-   role.id==='leader'?'Issue an internal editorial decision and actionable blockers. From day 20 onward also draft the four submission documents, with 3–5 highlights of at most 85 characters each. Never invent ethics approval, funding or exclusive-submission declarations.':'Return an evidence-specific critique and concrete improvements.'};
- const model=env.LAB_AI_MODEL||'@cf/meta/llama-3.3-70b-instruct-fp8-fast';
- inputsCompact.references=inputsCompact.references.slice(0,60).map(r=>({...r,abstract:r.abstract?.slice(0,400)}));
- const request=env.AI.run(model,{messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(inputsCompact)}],max_tokens:role.id==='writer'||role.id==='leader'?4500:1800,temperature:.1});
+   role.id==='leader'?'Issue an internal editorial decision and actionable blockers. From day 20 onward also draft the four submission documents, with 3–5 highlights of at most 85 characters each. Never invent ethics approval, funding or exclusive-submission declarations.':'Return at least three non-duplicative, evidence-specific discussion points suitable for the actual manuscript: a claim, the precise evidence boundary, and a concrete author action. Do not merely restate that results are missing; give substantive scholarly analysis or verified literature directions. The literature curator must distinguish verified DOI metadata from independently reviewed full texts.'};
+ const model=(role.id==='collector_literature'?(env.LAB_LITERATURE_AI_MODEL||'@cf/meta/llama-3.1-8b-instruct-fast'):null)||env.LAB_AI_MODEL||'@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+ inputsCompact.references=inputsCompact.references.slice(0,role.id==='collector_literature'?22:40).map(r=>({...r,abstract:r.abstract?.slice(0,role.id==='collector_literature'?180:350)}));
+ const request=env.AI.run(model,{messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(inputsCompact)}],max_tokens:role.id==='writer'||role.id==='leader'?4500:role.id==='collector_literature'?950:1800,temperature:.1});
  // Writer/leader generate up to 4500 tokens on a 70B model; 45s was too short (cursor 8 = writer timed out). Override with LAB_AI_TIMEOUT_MS.
- const aiTimeoutMs=Math.min(150000,Math.max(30000,Number(env.LAB_AI_TIMEOUT_MS)||(role.id==='writer'||role.id==='leader'?120000:60000)));
+ const aiTimeoutMs=Math.min(150000,Math.max(30000,Number(env.LAB_AI_TIMEOUT_MS)||(role.id==='writer'||role.id==='leader'?120000:role.id==='collector_literature'?45000:60000)));
  let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`lab_ai_timeout:${Math.round(aiTimeoutMs/1000)}s:${role.id}`)),aiTimeoutMs);});
  let response;try{response=await Promise.race([request,timeout]);}finally{clearTimeout(timer);}
  const text=typeof response==='string'?response:response?.response||response?.result?.response;
@@ -131,17 +132,35 @@ export async function processLabTick(env){
   const task=await one(env.DB,`UPDATE lab_tasks SET status='running',attempts=attempts+1,started_at=?,error=NULL WHERE campaign_id=? AND seq=? AND status IN ('pending','retry','running') RETURNING *`,[now,c.id,c.cursor]);
   if(!task)throw new Error('lab_cursor_task_missing');
   if(task.attempts>MAX_ATTEMPTS){await completeTaskFailure(env,c,task,token,'Lease expired after maximum task attempts');return {status:'task_exhausted'};}
-  if(task.role_id==='collector_literature'&&(task.day===1||task.day%7===0)){
-   const rows=await collectLabLiterature(c,safeConfig(c));
+  let literatureFetch={attempted:false,retrieved:0,error:null};
+  if(task.role_id==='collector_literature'){
+   literatureFetch.attempted=true;
+   let rows=[];
+   try { rows=await collectLabLiterature(c,safeConfig(c)); literatureFetch.retrieved=rows.length; }
+   catch(e) { literatureFetch.error=String(e?.message||e).slice(0,160);console.warn('lab_literature_metadata_retry_next_cycle',literatureFetch.error); }
    await writeBatches(env.DB,rows.map(r=>env.DB.prepare(`INSERT INTO lab_sources(campaign_id,doi,title,authors_json,journal,published_year,url,abstract,retrieved_at)
     VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_id,doi) DO UPDATE SET title=excluded.title,authors_json=excluded.authors_json,journal=excluded.journal,published_year=excluded.published_year,abstract=excluded.abstract,retrieved_at=excluded.retrieved_at`).bind(c.id,r.doi,r.title,JSON.stringify(r.authors),r.journal,r.published_year,r.url,r.abstract,r.retrieved_at)));
   }
   const inputs=await taskInputs(env,c);
-  const output=await inferLabTask(env,c,task,snapshot,inputs);
+  let output;
+  try { output=await inferLabTask(env,c,task,snapshot,inputs); }
+  catch(e) {
+   if(task.role_id!=='collector_literature'||!/^lab_ai_timeout:/.test(String(e?.message||e)))throw e;
+   // Metadata-based fallback, explicitly not an AI literature synthesis or full-text review.
+   output={summary:`Literature metadata audit saved: ${inputs.sources.length} DOI-indexed records; AI synthesis timed out and requires follow-up.`,findings:[],blockers:['Literature AI synthesis timed out; full-text relevance and claim support require verification.'],recommendations:['Review retrieved DOI metadata, verify full texts and reconcile the reference list before submission.'],markdown:'',documents:{},section:null,_ai:{ok:false,reason:'timeout_metadata_fallback'}};
+  }
+  if(task.role_id==='collector_literature'){
+   output.summary=(`Literature audit: ${inputs.sources.length} DOI-indexed records; fetched ${literatureFetch.retrieved} metadata items this cycle. `+output.summary).slice(0,1800);
+   if(literatureFetch.error)output.blockers=[...(output.blockers||[]),'Crossref metadata refresh unavailable this cycle; existing references retained; retry next literature cycle.'];
+   output.literature_metadata={count:inputs.sources.length,fetched:literatureFetch.retrieved,fetch_failed:!!literatureFetch.error,full_text_reviewed:false};
+  }
   // Pause/configuration changes revoke the lease. Check again before atomic output writes.
   const owned=await one(env.DB,'SELECT id FROM lab_campaigns WHERE id=? AND lease_token=? AND status=\'active\'',[c.id,token]);
   if(!owned)return {status:'lease_lost'};
   const at=nowIso(),cursor=c.cursor+1,statements=[];
+  // On DAY 3, initialize remaining manuscript sections from transparent, non-numerical
+  // academic prose. This is atomic with the successful task and never overwrites edits.
+  if(task.day>=3)statements.push(...earlyManuscriptStatements(env.DB,{...c,lease_token:token},snapshot));
   const putDoc=(section,markdown)=>statements.push(env.DB.prepare(`INSERT INTO lab_documents(campaign_id,section,markdown,evidence_signature,task_seq,updated_at)
    SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=? AND status='active')
    ON CONFLICT(campaign_id,section) DO UPDATE SET markdown=excluded.markdown,evidence_signature=excluded.evidence_signature,task_seq=excluded.task_seq,updated_at=excluded.updated_at`).bind(c.id,section,markdown,snapshot.data_digest,task.seq,at,c.id,token));

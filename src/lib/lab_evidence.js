@@ -111,9 +111,9 @@ export function promptEvidence(s){
 }
 export async function collectLabLiterature(campaign,config,fetcher=fetch){
  const url=new URL('https://api.crossref.org/works');
- const angle=['','human oversight accountability','robust optimization decision uncertainty','public payment governance','algorithmic delegation boundaries'][Math.floor(campaign.cursor/70)%5];
+ const angle=['public sector algorithmic oversight','human oversight accountability','robust optimization decision uncertainty','public payment governance','algorithmic delegation boundaries'][Math.floor(campaign.cursor/10)%5];
  url.searchParams.set('query',[config.literature_query,angle].filter(Boolean).join(' '));url.searchParams.set('rows','12');
- url.searchParams.set('filter','type:journal-article,from-pub-date:2023-01-01');
+ url.searchParams.set('filter','type:journal-article,from-pub-date:2010-01-01');
  url.searchParams.set('select','DOI,title,author,container-title,published,URL,abstract');
  const response=await fetcher(url,{headers:{'user-agent':'DCVResearchLab/1.0 (bounded scholarly metadata collection)','accept':'application/json'},signal:AbortSignal.timeout(15000)});
  if(!response.ok)throw new Error('Crossref HTTP '+response.status);

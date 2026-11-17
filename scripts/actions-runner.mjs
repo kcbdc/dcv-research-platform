@@ -5,7 +5,7 @@ import {createD1Rest} from './lib/d1-rest.mjs';
 import {acquireRunner,heartbeatRunner,releaseRunner} from './lib/actions-runtime.mjs';
 import {scheduleAll,processJobs} from '../src/lib/orchestrator.js';
 import {scheduleLab} from '../src/lib/lab.js';
-export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
+export async function runActions(env,{seconds=100,maxJobs=3,maxCalls=130}={}){
  const token=await acquireRunner(env);if(!token)return {status:'runner_already_active',jobs:0};
  const started=Date.now();let completed=0,failures=0,primaryError=null;
  try{
@@ -18,7 +18,7 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
   const initial=due?[]:await scheduleAll(env,{process:false});
   const first=Array.isArray(initial)?initial:[];
   completed+=first.length;failures+=first.filter(r=>!r.ok).length;
-  while(Date.now()-started<seconds*1000&&completed<maxJobs&&(typeof env.DB.remaining==='number'?env.DB.remaining>=60:env.DB.calls<maxCalls-80)){
+  while(Date.now()-started<seconds*1000&&completed<maxJobs&&!env.RUNNER_RATE_LIMIT_DEFERRED&&(typeof env.DB.remaining==='number'?env.DB.remaining>=60:env.DB.calls<maxCalls-80)){
    await heartbeatRunner(env,token);
    const results=await processJobs(env);if(!results.length)break;
    completed+=results.filter(r=>!r.deferred).length;failures+=results.filter(r=>!r.ok&&!r.deferred).length;if(results.some(r=>r.deferred)){env.RUNNER_BUDGET_DEFERRED=true;break;}
@@ -33,8 +33,8 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
    ]);const c=result[1].results?.[0]||{};const candidates=[['pending',c.pending],['confirmed_feasible',c.confirmed_feasible],['infeasible',c.infeasible],['other',c.other]].filter(([,n])=>Number(n||0)>0).map(([status,n])=>({status,n:Number(n)}));progress={jobs:result[0].results||[],candidates};
   }
   const pending=progress?.jobs.some(j=>j.status==='queued'||j.status==='running');
-  return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':pending?'work_remaining':'completed',jobs:completed,failures,progress,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0),elapsed_seconds:Math.round((Date.now()-started)/1000)};
- }catch(error){if(error.message==='runner_api_budget_exhausted')return {status:'budget_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0)};primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{if(env.DB.withControl)await env.DB.withControl(()=>releaseRunner(env,token,completed-failures));else await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError)console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
+  return {status:failures?'completed_with_job_errors':env.RUNNER_RATE_LIMIT_DEFERRED?'rate_limit_deferred':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':pending?'work_remaining':'completed',jobs:completed,failures,progress,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0),elapsed_seconds:Math.round((Date.now()-started)/1000)};
+ }catch(error){if(error.code==='D1_RATE_LIMITED')return {status:'rate_limit_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0)};if(error.message==='runner_api_budget_exhausted')return {status:'budget_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls,d1_rows_read:Number(env.DB.rowsRead||0)};primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{if(env.DB.withControl)await env.DB.withControl(()=>releaseRunner(env,token,completed-failures));else await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError||env.RUNNER_RATE_LIMIT_DEFERRED||error.code==='D1_RATE_LIMITED')console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
 }
 async function main(){
  let stage='load_configuration';try{

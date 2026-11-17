@@ -21,15 +21,26 @@ export function restStatement(sql, params=[]) {
   if(i!==params.length)throw new Error('D1 parameter count mismatch');
   return {sql:out,params:values};
 }
-export function createD1Rest({accountId,databaseId,token,fetchImpl=fetch,intervalMs=650,maxCalls=250,sleep=ms=>new Promise(r=>setTimeout(r,ms))}){
+export function createD1Rest({accountId,databaseId,token,fetchImpl=fetch,intervalMs=1250,maxCalls=130,sleep=ms=>new Promise(r=>setTimeout(r,ms))}){
   if(!/^[a-f0-9]{32}$/i.test(accountId||'')||!/^[a-f0-9-]{36}$/i.test(databaseId||'')||!token)throw new Error('Missing or invalid Cloudflare D1 runner credentials');
   let calls=0,last=0,workCalls=0,controlCalls=0,controlDepth=0,rowsRead=0;
   const query=async statements=>{
-    for(let attempt=0;attempt<3;attempt++){
+    for(let attempt=0;attempt<4;attempt++){
       if(controlDepth?controlCalls>=20:workCalls>=maxCalls)throw new Error(controlDepth?'runner_cleanup_budget_exhausted':'runner_api_budget_exhausted');
       await sleep(Math.max(0,last+intervalMs-Date.now()));last=Date.now();calls++;if(controlDepth)controlCalls++;else workCalls++;
       let response;try{response=await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({batch:statements}),signal:AbortSignal.timeout(60000)});}catch{throw new RunnerError('D1_NETWORK_FAILED','D1 connection failed or timed out. Check Cloudflare availability; writes are not blindly retried.');}
-      if(response.status===429&&attempt<2){await sleep(Math.min(5000,Number(response.headers.get('retry-after')||2)*1000));continue;}
+      if(response.status===429){
+        // All 429s are throttles, not failed research. Honor Retry-After, with exponential
+        // fallback and a hard bound to avoid running beyond the Actions lease.
+        if(attempt<3){
+          const header=String(response.headers.get('retry-after')||'').trim();
+          const parsed=Number(header);
+          const retryMs=Number.isFinite(parsed)&&parsed>0?parsed*1000:(3000*2**attempt);
+          await sleep(Math.min(20000,Math.max(1500,retryMs)));
+          continue;
+        }
+        throw diagnoseD1(429,{errors:[{code:7429,message:'D1 rate limited'}]});
+      }
       let json;try{json=await response.json();}catch{throw new RunnerError('D1_RESPONSE_NOT_JSON','Cloudflare returned a non-JSON response.',{http_status:response.status});}
       if(!response.ok||!json.success||!Array.isArray(json.result)||json.result.some(r=>r.success===false))throw diagnoseD1(response.status,json);
       rowsRead+=json.result.reduce((n,r)=>n+Number(r?.meta?.rows_read||0),0);

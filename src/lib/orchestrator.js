@@ -93,7 +93,16 @@ export async function advanceProject(env,projectId){
   const busy=await one(env.DB,`SELECT type,phase FROM jobs WHERE project_id=? AND status IN ('queued','running') AND type IN ('compute_candidate','validate_project','recompute_project','finalize_recompute') LIMIT 1`,[projectId]);
   if(busy){
     const ph=String(busy.phase||''); const stage=busy.type==='compute_candidate'?(ph==='historical'||ph==='stress'?'validate':ph==='recompute'?'recompute':'compute'):busy.type==='validate_project'?'validate':'recompute';
-    await setStage(env,p,stage); return {stage,waiting:'jobs_in_flight',job_type:busy.type,phase:ph||null};
+    // A long queue of exploration/confirmation jobs must not starve robust evidence
+    // for already-confirmed candidates. Older versions only did this AFTER all
+    // candidate exploration had finished, leaving the funnel frozen on Synthetic.
+    // enqueueRobustValidation is idempotent for queued/running phase jobs and
+    // scoped to the current evidence revision.
+    let robustQueued=0;
+    if(busy.type==='compute_candidate' && !['historical','stress','recompute'].includes(ph)){
+      robustQueued=Number((await enqueueRobustValidation(env,projectId))?.queued||0);
+    }
+    await setStage(env,p,stage); return {stage,waiting:'jobs_in_flight',job_type:busy.type,phase:ph||null,robust_queued:robustQueued};
   }
   const cand=await one(env.DB,`SELECT candidate_total total,candidate_feasible feasible,candidate_active active FROM project_cycle_stats WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
   const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
@@ -122,8 +131,12 @@ export async function advanceProject(env,projectId){
       AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=c.project_id AND j.type='compute_candidate' AND json_extract(j.payload_json,'$.candidate_id')=c.id AND j.status IN ('queued','running'))
       AND (SELECT COUNT(*) FROM jobs f WHERE f.project_id=c.project_id AND f.type='compute_candidate' AND json_extract(f.payload_json,'$.candidate_id')=c.id AND f.status='failed')<3 LIMIT 100`,[projectId,cycle]);
     if(missing.length)await ensureFrozenProtocol(env,projectId);
-    const queued=await enqueueMany(env,projectId,'compute_candidate',missing.map(c=>({candidate_id:c.id,phase:'exploration',cycle:0})),40);
-    await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued,total,waiting:queued?'recovered_missing_jobs':'inspect_failed_jobs'};
+    const queued=await enqueueMany(env,projectId,'compute_candidate',missing.map(c=>({candidate_id:c.id,phase:'exploration',cycle:0,evidence_revision:rev})),40);
+    // Run robust gates for any already-confirmed candidates while the remaining
+    // pool is still exploring. This recovers candidates confirmed by older
+    // deployments which did not schedule Historical/Stress at confirmation.
+    const robustQueued=Number((await enqueueRobustValidation(env,projectId))?.queued||0);
+    await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued,robust_queued:robustQueued,total,waiting:queued?'recovered_missing_jobs':'inspect_failed_jobs'};
   }
   const unfinished=await jobExists(env,projectId,'compute_candidate','exploration')||await jobExists(env,projectId,'compute_candidate','refinement')||await jobExists(env,projectId,'compute_candidate','confirmation');
   if(unfinished){ await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued:1,total}; }
@@ -138,14 +151,17 @@ export async function advanceProject(env,projectId){
   let robustGate=(rn.historical||0)<feasible || (rn.stress||0)<feasible;
   if(robustGate){
     let queuedRobust=0;
-    if(!(await jobExists(env,projectId,'compute_candidate','historical')) && !(await jobExists(env,projectId,'compute_candidate','stress'))){
+    // Always check current-revision missing work. A queued job from an older
+    // revision must never suppress the new one; the enqueue helper filters
+    // current-revision queued/running jobs by candidate and phase.
+    {
       queuedRobust=Number((await enqueueRobustValidation(env,projectId))?.queued||0);
       // enqueueRobustValidation reads the authoritative design_candidates/simulation_runs tables.
       // If it finds nothing to run while the materialized counter still says work is missing, the
       // counter is stale (e.g. duplicated legacy triggers double-counted it). Waiting here would
       // re-enter this branch on every tick forever and never reach validate_project, the
       // External Validation Matrix or human review, so repair the cache and continue instead.
-      if(!queuedRobust){
+      if(!queuedRobust && !(await jobExists(env,projectId,'compute_candidate','historical')) && !(await jobExists(env,projectId,'compute_candidate','stress'))){
         await repairCycleStats(env,projectId,cycle);
         const stillMissing=await one(env.DB,`SELECT 1 x FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='historical' AND r.evidence_revision=?) OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='stress' AND r.evidence_revision=?)) LIMIT 1`,[projectId,cycle,rev,rev]);
         robustGate=!!stillMissing;

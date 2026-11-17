@@ -475,7 +475,7 @@ export async function enqueueRobustValidation(env,projectId){
   // same in-flight phase again when advanceProject later performs its batch sweep.
   const inFlight=await all(env.DB,`SELECT json_extract(payload_json,'$.candidate_id') candidate_id,phase FROM jobs
     WHERE project_id=? AND type='compute_candidate' AND phase IN ('historical','stress')
-      AND status IN ('queued','running')`,[projectId]);
+      AND status IN ('queued','running') AND CAST(json_extract(payload_json,'$.evidence_revision') AS INTEGER)=?`,[projectId,rev]);
   const busy=new Set(inFlight.map(j=>`${j.candidate_id}|${j.phase}`));
   const hist=[],stress=[];
   for(const c of cands){

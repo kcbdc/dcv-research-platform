@@ -34,18 +34,21 @@ function overall(row){
   return 'NA';
 }
 function latestByCandidate(rows){const m=new Map();for(const r of rows)if(!m.has(`${r.candidate_id}|${r.phase}`))m.set(`${r.candidate_id}|${r.phase}`,r);return m;}
-export async function refreshValidationMatrix(env,projectId){
+export async function refreshValidationMatrix(env,projectId,{candidateId=null}={}){
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
   if(!p)throw new Error('project_not_found');
   const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
-  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY id`,[projectId,cycle]);
+  const cands=candidateId
+    ?await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND id=?`,[projectId,cycle,candidateId])
+    :await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY id`,[projectId,cycle]);
   const config=await one(env.DB,`SELECT constraints_json FROM project_config WHERE project_id=?`,[projectId]);
   const constraints=safeJson(config?.constraints_json,{});
   if(!cands.length)return {rows:0,cycle,revision:rev};
-  const runs=await all(env.DB,`SELECT r.candidate_id,r.phase,r.result_json FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress') ORDER BY r.created_at DESC`,[projectId,cycle,rev]);
-  const runMap=latestByCandidate(runs);
-  const humans=await all(env.DB,`SELECT candidate_id,status,result_json FROM validations WHERE project_id=? AND evidence_revision=? AND validation_type='human_recompute' ORDER BY created_at DESC`,[projectId,rev]);
-  const humanMap=new Map();for(const h of humans)if(!humanMap.has(h.candidate_id))humanMap.set(h.candidate_id,h);
+  const runs=await all(env.DB,`SELECT r.candidate_id,r.phase,r.result_json FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress') AND (? IS NULL OR r.candidate_id=?) ORDER BY r.created_at DESC`,[projectId,cycle,rev,candidateId,candidateId]);
+  const targetIds=candidateId?new Set([candidateId]):null;
+  const runMap=latestByCandidate(targetIds?runs.filter(r=>targetIds.has(r.candidate_id)):runs);
+  const humans=await all(env.DB,`SELECT candidate_id,status,result_json FROM validations WHERE project_id=? AND evidence_revision=? AND validation_type='human_recompute' AND (? IS NULL OR candidate_id=?) ORDER BY created_at DESC`,[projectId,rev,candidateId,candidateId]);
+  const humanMap=new Map();for(const h of humans)if((!targetIds||targetIds.has(h.candidate_id))&&!humanMap.has(h.candidate_id))humanMap.set(h.candidate_id,h);
   const ts=nowIso(),stmts=[];let pass=0,fail=0,hold=0,partial=0;
   for(const c of cands){
     const conf=safeJson(runMap.get(`${c.id}|confirmation`)?.result_json,{}),hist=safeJson(runMap.get(`${c.id}|historical`)?.result_json,{}),stress=safeJson(runMap.get(`${c.id}|stress`)?.result_json,{}),h=humanMap.get(c.id);

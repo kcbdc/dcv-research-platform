@@ -223,7 +223,14 @@ async function execute(env,job){
     case 'measure_project': { const r=await measureProject(env,id); await enqueue(env,id,'seed_candidates',{},35); return r; }
     case 'seed_candidates': return seedCandidates(env,id);
     case 'refit_empirical': { const r=await refitEmpiricalCalibration(env,id,{promote:true}); await enqueueOnce(env,id,'advance_project',{},98,5); return r; }
-    case 'compute_candidate': { const r=await computeCandidate(env,id,payload.candidate_id,payload.phase,payload.cycle||0); await enqueueOnce(env,id,'advance_project',{},98,5); return r; }
+    case 'compute_candidate': {
+      if(payload.evidence_revision!==undefined){
+        const cur=await one(env.DB,`SELECT evidence_revision FROM projects WHERE id=?`,[id]);
+        if(Number(cur?.evidence_revision||0)!==Number(payload.evidence_revision))return {skipped:'superseded_evidence_revision'};
+      }
+      const r=await computeCandidate(env,id,payload.candidate_id,payload.phase,payload.cycle||0);
+      await enqueueOnce(env,id,'advance_project',{},98,5); return r;
+    }
     case 'advance_project': return advanceProject(env,id);
     case 'validate_project': { const r=await validateProject(env,id); await enqueueOnce(env,id,'advance_project',{},98,5); return r; }
     case 'fit_reviewer': return fitReviewerModel(env,id);   // HOLD 시 자기 재예약(900초 폴링) 제거: 새 관측이 오면 API 가 advance 를 깨운다

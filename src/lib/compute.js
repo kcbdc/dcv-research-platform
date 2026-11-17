@@ -6,6 +6,7 @@ import { loadEmpiricalCalibration, empiricalScenarioFromEpisode } from './empiri
 import { ensureFrozenProtocol, assertProtocolIntegrity, ENGINE_VERSION } from './rigor.js';
 import { cached } from './memo.js';
 import { officialValidationScenarios } from './official_mapping.js';
+import { refreshValidationMatrix } from './validation_matrix.js';
 
 const EPS=1e-9;
 const ESTIMATORS=['ema','kalman','changepoint','adaptive'];
@@ -440,12 +441,28 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
     else if(ev.classification==='UNRESOLVED') await run(env.DB,`UPDATE design_candidates SET status='boundary_hold',evidence_status='UNRESOLVED',boundary_score=?,updated_at=? WHERE id=?`,[ev.boundary_score,nowIso(),candidateId]);
     if(ev.classification==='FEASIBLE')await enqueueComputeOnce(env,projectId,{candidate_id:candidateId,phase:'confirmation',cycle:0},45);
   } else if(phase==='confirmation'){
-    if(ev.classification==='FEASIBLE')await run(env.DB,`UPDATE design_candidates SET status='confirmed_feasible',evidence_status='FEASIBLE',boundary_score=?,objective_score=?,updated_at=? WHERE id=?`,[ev.boundary_score,m.objective_score,nowIso(),candidateId]);
+    if(ev.classification==='FEASIBLE'){
+      await run(env.DB,`UPDATE design_candidates SET status='confirmed_feasible',evidence_status='FEASIBLE',boundary_score=?,objective_score=?,updated_at=? WHERE id=?`,[ev.boundary_score,m.objective_score,nowIso(),candidateId]);
+      // Pipeline the two independent robustness gates immediately for this candidate.
+      // Other candidates may still be exploring; final validation/approval remains gated.
+      await enqueueComputeOnce(env,projectId,{candidate_id:candidateId,phase:'historical',cycle:0,evidence_revision:projectRev},48);
+      await enqueueComputeOnce(env,projectId,{candidate_id:candidateId,phase:'stress',cycle:0,evidence_revision:projectRev},49);
+    }
     else if(ev.classification==='INFEASIBLE')await run(env.DB,`UPDATE design_candidates SET status='confirmation_failed',evidence_status='INFEASIBLE',updated_at=? WHERE id=?`,[nowIso(),candidateId]);
     else if(cycle<config.max_confirmation)await enqueueComputeOnce(env,projectId,{candidate_id:candidateId,phase:'confirmation',cycle:cycle+1},42);
     else await run(env.DB,`UPDATE design_candidates SET status='boundary_hold',evidence_status='UNRESOLVED',boundary_score=?,updated_at=? WHERE id=?`,[ev.boundary_score,nowIso(),candidateId]);
   }
-  await audit(env,projectId,'agent','cdrs.run','candidate',candidateId,{phase,cycle,classification:ev.classification,boundary_score:ev.boundary_score,metrics:m,seed,result_hash:resultHash,runner_code_revision:env.RUNNER_CODE_REVISION||null,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_profile:cal.profile.version});
+  // Authoritative simulation_runs has already been committed. Update only this row
+  // instead of waiting for validate_project (which can be blocked by other candidates).
+  // Matrix is derived: never discard a successfully persisted scientific run if its
+  // cache refresh encounters a transient D1 API error; GET can rebuild it later.
+  if(['confirmation','historical','stress'].includes(phase)){
+    try{await refreshValidationMatrix(env,projectId,{candidateId});}
+    catch(matrixError){
+      try{await audit(env,projectId,'agent','validation_matrix.refresh_pending','candidate',candidateId,{phase,error:String(matrixError).slice(0,180)});}catch(_){}
+    }
+  }
+  await audit(env,projectId,'agent','cdrs.run' ,'candidate',candidateId,{phase,cycle,classification:ev.classification,boundary_score:ev.boundary_score,metrics:m,seed,result_hash:resultHash,runner_code_revision:env.RUNNER_CODE_REVISION||null,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_profile:cal.profile.version});
   return{id,phase,cycle,seed,classification:ev.classification,boundary_score:ev.boundary_score,...m};
 }
 export async function enqueueRobustValidation(env,projectId){
@@ -454,10 +471,16 @@ export async function enqueueRobustValidation(env,projectId){
   // 후보마다 'SELECT DISTINCT phase' 를 날리던 N+1 루프 → 프로젝트 단위 1회 조회(커버링 인덱스)
   const doneRows=await all(env.DB,`SELECT DISTINCT r.candidate_id,r.phase FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('historical','stress')`,[projectId,cycle,rev]);
   const done=new Set(doneRows.map(r=>`${r.candidate_id}|${r.phase}`));
+  // Confirmation can enqueue gates before all candidates finish. Never queue the
+  // same in-flight phase again when advanceProject later performs its batch sweep.
+  const inFlight=await all(env.DB,`SELECT json_extract(payload_json,'$.candidate_id') candidate_id,phase FROM jobs
+    WHERE project_id=? AND type='compute_candidate' AND phase IN ('historical','stress')
+      AND status IN ('queued','running')`,[projectId]);
+  const busy=new Set(inFlight.map(j=>`${j.candidate_id}|${j.phase}`));
   const hist=[],stress=[];
   for(const c of cands){
-    if(!done.has(`${c.id}|historical`))hist.push({candidate_id:c.id,phase:'historical',cycle:0});
-    if(!done.has(`${c.id}|stress`))stress.push({candidate_id:c.id,phase:'stress',cycle:0});
+    if(!done.has(`${c.id}|historical`)&&!busy.has(`${c.id}|historical`))hist.push({candidate_id:c.id,phase:'historical',cycle:0,evidence_revision:rev});
+    if(!done.has(`${c.id}|stress`)&&!busy.has(`${c.id}|stress`))stress.push({candidate_id:c.id,phase:'stress',cycle:0,evidence_revision:rev});
   }
   // 작업당 INSERT+큐 전송 1회씩 하던 것을 배치로
   await enqueueMany(env,projectId,'compute_candidate',[...hist,...stress],50);

@@ -137,3 +137,18 @@ test('Stress scenario metrics without valid constraints are HOLD not PASS',async
   const vm=await getValidationMatrix({DB},pid);
   assert.equal(vm.rows[0].bis_status,'HOLD');
 });
+
+test('per-candidate write-through refresh updates only the completed candidate and preserves peers',async()=>{
+  const DB=makeDb(),pid=await seedProject(DB,{candidates:2,reviewer:0,episodes:0}),ts=now();
+  DB.raw.prepare('DELETE FROM simulation_runs WHERE project_id=?').run(pid);
+  await refreshValidationMatrix({DB},pid);
+  DB.raw.prepare(`UPDATE candidate_validation_matrix SET synthetic_status='FAIL' WHERE candidate_id='cand_1'`).run();
+  DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision)
+    VALUES('fast_hist',?,'cand_0','historical',1,100,?,?,0)`).run(pid,ev('FEASIBLE',{Historical:{classification:'FEASIBLE'}}),ts);
+  const result=await refreshValidationMatrix({DB},pid,{candidateId:'cand_0'});
+  assert.equal(result.rows,1);
+  const a=DB.raw.prepare('SELECT historical_status FROM candidate_validation_matrix WHERE candidate_id=?').get('cand_0');
+  const b=DB.raw.prepare('SELECT synthetic_status FROM candidate_validation_matrix WHERE candidate_id=?').get('cand_1');
+  assert.equal(a.historical_status,'PASS');
+  assert.equal(b.synthetic_status,'FAIL');
+});

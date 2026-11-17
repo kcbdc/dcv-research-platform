@@ -19,7 +19,7 @@ export async function refreshValidationMatrix(env,projectId){
   const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
   const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY id`,[projectId,cycle]);
   if(!cands.length)return {rows:0,cycle,revision:rev};
-  const runs=await all(env.DB,`SELECT r.candidate_id,r.phase,r.result_json FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('confirmation','historical','stress') ORDER BY r.created_at DESC`,[projectId,cycle]);
+  const runs=await all(env.DB,`SELECT r.candidate_id,r.phase,r.result_json FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress') ORDER BY r.created_at DESC`,[projectId,cycle,rev]);
   const runMap=latestByCandidate(runs);
   const humans=await all(env.DB,`SELECT candidate_id,status,result_json FROM validations WHERE project_id=? AND evidence_revision=? AND validation_type='human_recompute' ORDER BY created_at DESC`,[projectId,rev]);
   const humanMap=new Map();for(const h of humans)if(!humanMap.has(h.candidate_id))humanMap.set(h.candidate_id,h);
@@ -50,6 +50,22 @@ export async function getValidationMatrix(env,projectId){
   const p=await one(env.DB,`SELECT name,research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
   const currentCycle=Number(p.research_cycle||1),currentRev=Number(p.evidence_revision||0);
   let cycle=currentCycle,rev=currentRev,rows=await matrixRows(env,projectId,cycle,rev),stale=false,snapshotUpdatedAt=null;
+  // Matrix is a derived D1 cache, not the source of truth. A migration (0024),
+  // interrupted G3, or new run arriving before G3 can leave it empty/stale.
+  // Reconcile on GET only when authoritative candidate/run/human evidence changed.
+  const source=await one(env.DB,`SELECT
+    (SELECT COUNT(*) FROM design_candidates WHERE project_id=? AND research_cycle=?) candidates,
+    (SELECT MAX(r.created_at) FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id
+      WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress')) latest_run,
+    (SELECT MAX(v.created_at) FROM validations v JOIN design_candidates c ON c.id=v.candidate_id
+      WHERE v.project_id=? AND c.research_cycle=? AND v.evidence_revision=? AND v.validation_type='human_recompute') latest_human`,
+    [projectId,currentCycle,projectId,currentCycle,currentRev,projectId,currentCycle,currentRev]);
+  const cachedTime=rows.reduce((m,r)=>String(r.updated_at||'')>m?String(r.updated_at):m,'');
+  const newEvidence=[source?.latest_run,source?.latest_human].some(t=>String(t||'')>cachedTime);
+  if(Number(source?.candidates||0)>0 && (rows.length!==Number(source.candidates)||newEvidence)){
+    await refreshValidationMatrix(env,projectId);
+    rows=await matrixRows(env,projectId,currentCycle,currentRev);
+  }
   // A new revision can contain placeholder NA rows. Treat them as not yet validated,
   // retaining the last informative snapshot instead of rendering a wiped figure.
   const noObservedGates = rs => !rs.some(r=>DIMS.some(k=>['PASS','FAIL','HOLD'].includes(r[k.toLowerCase()+'_status'])));

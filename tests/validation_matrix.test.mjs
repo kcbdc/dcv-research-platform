@@ -83,3 +83,29 @@ test('Figure 3 shows an explicit wait state and preserves tiny regret precision'
   figs=buildFigures({...base,candidates:{cells:[],estimators:[],finalists:[{id:'a',estimator:'ema',sigma:.1,alpha:.35,K:2,d:0,max_regret:.00001234},{id:'b',estimator:'kalman',sigma:.2,alpha:.35,K:2,d:1,max_regret:.00004567}]}});
   f=figs.find(x=>x.n===3);assert.ok(f);assert.match(f.svg,/1\.23e-5|0\.000012/);assert.ok(!/>0<\/text>.*>0<\/text>.*>0<\/text>/.test(f.svg));
 });
+
+
+test('GET repairs empty Matrix from stored D1 simulation runs without a G3 event',async()=>{
+  const DB=makeDb(),pid=await seedProject(DB,{candidates:1,reviewer:0,episodes:0});
+  DB.raw.exec('DELETE FROM candidate_validation_matrix; DELETE FROM simulation_runs;');
+  const ts=new Date(Date.now()-1000).toISOString();
+  DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision) VALUES('recovered_run',?, 'cand_0','confirmation',1,100,?, ?,0)`).run(pid,ev('FEASIBLE',{Synthetic:{classification:'FEASIBLE'}}),ts);
+  const result=await getValidationMatrix({DB},pid);
+  assert.equal(result.rows.length,1);
+  assert.equal(result.rows[0].synthetic_status,'PASS');
+  assert.equal(result.summary.dimensions.Synthetic.PASS,1);
+  assert.equal(DB.raw.prepare('SELECT count(*) n FROM candidate_validation_matrix').get().n,1);
+});
+
+test('GET refreshes Matrix after a later simulation run, without replacing true evidence with invented PASS',async()=>{
+  const DB=makeDb(),pid=await seedProject(DB,{candidates:1,reviewer:0,episodes:0});
+  DB.raw.exec('DELETE FROM simulation_runs; DELETE FROM candidate_validation_matrix;');
+  let v=await getValidationMatrix({DB},pid);
+  assert.equal(v.rows.length,1);
+  assert.equal(v.rows[0].synthetic_status,'NA');
+  const ts=new Date(Date.now()+1000).toISOString();
+  DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision) VALUES('new_run',?, 'cand_0','confirmation',1,100,?, ?,0)`).run(pid,ev('INFEASIBLE'),ts);
+  v=await getValidationMatrix({DB},pid);
+  assert.equal(v.rows[0].synthetic_status,'FAIL');
+  assert.equal(v.rows[0].bis_status,'NA');
+});

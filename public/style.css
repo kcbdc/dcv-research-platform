@@ -1255,3 +1255,10 @@ html,body{overflow-x:clip!important}
 #reportModal .report-html table th,#reportModal .report-html table td{white-space:nowrap!important;min-width:max-content!important}
 #reportModal .report-html table th:first-child,#reportModal .report-html table td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 #d9e0e4}
 #reportModal .report-html{min-width:0!important;max-width:100%!important}
+
+
+/* Delegation Evidence Funnel: 단계 상태별 색상 (na / partial / zero / blocked). 앞선 !important 규칙보다 뒤에 두어 우선한다. */
+.funnel-step.funnel-na{background:#f0f3f6!important;color:#536478!important;box-shadow:none!important}
+.funnel-step.funnel-partial{background:linear-gradient(90deg,#d97706,#fbbf24)!important;color:#fff!important}
+.funnel-step.funnel-zero{background:linear-gradient(90deg,#be123c,#fb7185)!important;color:#fff!important}
+.funnel-step.funnel-blocked{background:repeating-linear-gradient(135deg,#e9e7f2,#e9e7f2 8px,#dedaec 8px,#dedaec 16px)!important;color:#4b4670!important;box-shadow:none!important;border:1px dashed #b3acd1}

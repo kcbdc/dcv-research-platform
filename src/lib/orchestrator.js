@@ -104,8 +104,8 @@ export async function advanceProject(env,projectId){
     }
     await setStage(env,p,stage); return {stage,waiting:'jobs_in_flight',job_type:busy.type,phase:ph||null,robust_queued:robustQueued};
   }
-  const cand=await one(env.DB,`SELECT candidate_total total,candidate_feasible feasible,candidate_active active FROM project_cycle_stats WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
-  const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
+  const cand=await one(env.DB,`SELECT candidate_total total,candidate_feasible feasible,candidate_active active,candidate_pending pending FROM project_cycle_stats WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
+  const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0), cachedPending=Number(cand?.pending||0);
   await syncReplicationStatus(env,projectId);
   if(!total){
     const inFlight=await one(env.DB,`SELECT COUNT(*) n FROM jobs WHERE project_id=? AND type IN ('seed_empirical_panel','define_project','collect_project','refit_empirical','measure_project','seed_candidates') AND status IN ('queued','running')`,[projectId]);
@@ -126,17 +126,28 @@ export async function advanceProject(env,projectId){
       AND (j.last_error LIKE '%protocol_integrity_failure%' OR j.last_error LIKE '%protocol_runtime_upgrade_required%' OR j.last_error LIKE '%protocol_drift_after_simulation_start%') LIMIT 1`,[cycle,projectId]);
     if(poisoned){const recovery=await recoverProtocolCycle(env,projectId,'stranded_pending_protocol_mismatch');return {stage:'protocol_recovery',recovery};}
     // Recover missing initial work in bounded batches. Never restart a completed run or retry permanent failures forever.
+    // UNEVALUATED 정체 방지: status='pending' 후보 중 queued/running 작업이 없는 것은 전부 재예약 대상이다.
+    //  - 이전 조건(exploration simulation_run 이 없을 것)은 '실행 결과는 저장됐지만 status UPDATE 전에 작업이 끊긴'
+    //    후보(D1 429/Worker 종료)를 영구히 제외해 UNEVALUATED 숫자가 줄지 않게 했다.
+    //    computeCandidate 는 simulationUnitId 로 저장된 결과를 재사용(saved)하므로 재실행은 재계산 없이 status 만 확정한다.
+    //  - 실패 횟수 상한(3)은 영구 오류에만 적용한다. 속도제한/락 복구 같은 일시 오류가 3번 쌓였다고 후보를 포기하지 않는다.
     const missing=await all(env.DB,`SELECT c.id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='pending'
-      AND NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='exploration')
       AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=c.project_id AND j.type='compute_candidate' AND json_extract(j.payload_json,'$.candidate_id')=c.id AND j.status IN ('queued','running'))
-      AND (SELECT COUNT(*) FROM jobs f WHERE f.project_id=c.project_id AND f.type='compute_candidate' AND json_extract(f.payload_json,'$.candidate_id')=c.id AND f.status='failed')<3 LIMIT 100`,[projectId,cycle]);
+      AND (SELECT COUNT(*) FROM jobs f WHERE f.project_id=c.project_id AND f.type='compute_candidate' AND json_extract(f.payload_json,'$.candidate_id')=c.id AND f.status='failed'
+        AND COALESCE(f.last_error,'') NOT LIKE '%D1_RATE_LIMITED%' AND COALESCE(f.last_error,'') NOT LIKE '%429%' AND COALESCE(f.last_error,'') NOT LIKE '%rate_limit%' AND COALESCE(f.last_error,'') NOT LIKE '%stale_lock_recovered%')<3 LIMIT 100`,[projectId,cycle]);
     if(missing.length)await ensureFrozenProtocol(env,projectId);
     const queued=await enqueueMany(env,projectId,'compute_candidate',missing.map(c=>({candidate_id:c.id,phase:'exploration',cycle:0,evidence_revision:rev})),40);
     // Run robust gates for any already-confirmed candidates while the remaining
     // pool is still exploring. This recovers candidates confirmed by older
     // deployments which did not schedule Historical/Stress at confirmation.
     const robustQueued=Number((await enqueueRobustValidation(env,projectId))?.queued||0);
-    await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued,robust_queued:robustQueued,total,waiting:queued?'recovered_missing_jobs':'inspect_failed_jobs'};
+    // 재예약할 후보가 없는데 캐시가 pending 을 보고하면 캐시 드리프트일 수 있다. 권위 테이블과 다를 때만 재계산한다.
+    let statsRepaired=false;
+    if(!queued&&cachedPending>0){
+      const real=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending'`,[projectId,cycle]);
+      if(Number(real?.n||0)!==cachedPending){await repairCycleStats(env,projectId,cycle);statsRepaired=true;}
+    }
+    await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued,robust_queued:robustQueued,total,stats_repaired:statsRepaired,waiting:queued?'recovered_missing_jobs':'inspect_failed_jobs'};
   }
   const unfinished=await jobExists(env,projectId,'compute_candidate','exploration')||await jobExists(env,projectId,'compute_candidate','refinement')||await jobExists(env,projectId,'compute_candidate','confirmation');
   if(unfinished){ await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued:1,total}; }

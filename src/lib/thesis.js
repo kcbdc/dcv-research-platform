@@ -9,6 +9,7 @@ import { officialSourceStatus } from './official_sources.js';
 import { assessDoctoralRigorSnapshot } from './doctoral_rigor.js';
 import {replicationStatus} from './replication.js';
 import {assessExternalValidity} from './external_validity.js';
+import { withNoninferiority } from './validation_matrix.js';
 
 const CLASS_SQL = `CASE
   WHEN c.status='pending' THEN 'unevaluated'
@@ -140,23 +141,27 @@ export async function buildThesisData(env, projectId) {
   const selectedInference = safeJson(selectedEvidence?.result_json,{}).inference || null;
 
   const validationRows = await all(env.DB, `SELECT v.candidate_id,v.validation_type,v.status,v.result_json,v.evidence_revision,v.created_at FROM validations v LEFT JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND (v.candidate_id IS NULL OR c.research_cycle=?) ORDER BY v.created_at DESC`, [projectId,cycle]);
-  const humanValidation = new Map(), robustValidation = new Map();
+  const humanValidation = new Map(), humanScreen = new Map(), robustValidation = new Map();
   for (const v of validationRows) {
     if (v.candidate_id == null) continue;
     if (v.validation_type === 'human_recompute' && Number(v.evidence_revision || 0) === rev && !humanValidation.has(v.candidate_id)) humanValidation.set(v.candidate_id, v);
+    // Display-only human verdict for Synthetic-confirmed candidates that are not robust-confirmed (same rule as the Matrix API).
+    if (v.validation_type === 'human_screen' && Number(v.evidence_revision || 0) === rev && !humanScreen.has(v.candidate_id)) humanScreen.set(v.candidate_id, v);
     if (v.validation_type === 'robust' && !robustValidation.has(v.candidate_id)) robustValidation.set(v.candidate_id, v);
   }
   const candidateStageSnapshot = (candId) => {
     const historicalRun = byCandPhase.get(`${candId}|historical`), syntheticRun = byCandPhase.get(`${candId}|confirmation`), stressRun = byCandPhase.get(`${candId}|stress`);
     const hr=safeJson(historicalRun?.result_json,{}),sr=safeJson(syntheticRun?.result_json,{}),stressResult=safeJson(stressRun?.result_json,{});
-    const hist = wrapStatus(classToStatusCode(hr.validation_groups?.Historical?.classification||hr.classification), { source:'historical_phase',measurements:evidenceMetrics(historicalRun,hr,'Historical') });
-    const syn = wrapStatus(classToStatusCode(sr.validation_groups?.Synthetic?.classification||sr.classification), { source:'confirmation_phase',measurements:evidenceMetrics(syntheticRun,sr,'Synthetic') });
-    const pick=(g,pred)=>{const c=stressResult.validation_groups?.[g]?.classification;const measurements=evidenceMetrics(null,stressResult,g,pred);if(c)return wrapStatus(classToStatusCode(c),{source:'validation_group',measurements});const z=subsetScenarioStatus(stressResult,constraints,pred);return wrapStatus(z.code,{...z,measurements});};
+    const hist = wrapStatus(withNoninferiority(classToStatusCode(hr.validation_groups?.Historical?.classification||hr.classification),hr,{exact:true}), { source:'historical_phase',measurements:evidenceMetrics(historicalRun,hr,'Historical') });
+    const syn = wrapStatus(withNoninferiority(classToStatusCode(sr.validation_groups?.Synthetic?.classification||sr.classification),sr,{exact:true}), { source:'confirmation_phase',measurements:evidenceMetrics(syntheticRun,sr,'Synthetic') });
+    const pick=(g,pred)=>{const c=stressResult.validation_groups?.[g]?.classification;const measurements=evidenceMetrics(null,stressResult,g,pred);if(c)return wrapStatus(withNoninferiority(classToStatusCode(c),stressResult,{exact:false}),{source:'validation_group',measurements});const z=subsetScenarioStatus(stressResult,constraints,pred);return wrapStatus(z.code,{...z,measurements});};
     const adv = pick('Adversarial',k=>!/^official_(bis|ecb)_/i.test(k));
     const bis = pick('BIS',k=>/^official_bis_/i.test(k));
     const ecb = pick('ECB',k=>/^official_ecb_/i.test(k));
-    const hv=humanValidation.get(candId),humanResult=safeJson(hv?.result_json,{});
-    const human = wrapStatus(validationToStatusCode(hv?.status), { source:'human_recompute_validation',measurements:{count:hv?1:0,loss_mean:humanResult.loss_mean??null,fp_rate:humanResult.fp_rate??null,fn_rate:humanResult.fn_rate??null,review_burden:humanResult.review_burden??null,recovery_time:humanResult.recovery_time??null} });
+    const hv=humanValidation.get(candId)||humanScreen.get(candId),humanResult=safeJson(hv?.result_json,{}),hm=humanResult.metrics||humanResult;
+    // Synthetic-confirmed but no human verdict yet = HOLD (pending human evidence), same as the Matrix API; never NA/PASS by default.
+    const humanPending=!hv&&syn.code==='PASS';
+    const human = wrapStatus(humanPending?'HOLD':validationToStatusCode(hv?.status), { source:humanPending?'human_pending':humanValidation.has(candId)?'human_recompute_validation':'human_screen_validation',reason:humanPending?(rmodel&&Number(rmodel.research_cycle)===cycle&&Number(rmodel.evidence_revision)===rev?'HUMAN_RECOMPUTE_PENDING':'HUMAN_REVIEWER_MODEL_PENDING'):undefined,measurements:{count:hv?1:0,loss_mean:hm.loss_mean??null,fp_rate:hm.fp_rate??null,fn_rate:hm.fn_rate??null,review_burden:hm.review_burden??null,recovery_time:hm.recovery_time??null} });
     return { historical: hist, synthetic: syn, adversarial: adv, bis, ecb, human };
   };
   const stageSnapshots = new Map(cands.map(c => [c.id, candidateStageSnapshot(c.id)]));

@@ -173,10 +173,14 @@ export async function advanceProject(env,projectId){
     }
   }
 
-  const valAgg=await all(env.DB,`SELECT v.validation_type t,v.status s,COUNT(*) c,COUNT(DISTINCT v.candidate_id) d FROM validations v LEFT JOIN design_candidates dc ON dc.id=v.candidate_id WHERE v.project_id=? AND dc.research_cycle=? AND (v.validation_type='robust' OR (v.validation_type='human_recompute' AND v.evidence_revision=?)) GROUP BY v.validation_type,v.status`,[projectId,cycle,rev]);
+  const valAgg=await all(env.DB,`SELECT v.validation_type t,v.status s,COUNT(*) c,COUNT(DISTINCT v.candidate_id) d FROM validations v LEFT JOIN design_candidates dc ON dc.id=v.candidate_id WHERE v.project_id=? AND dc.research_cycle=? AND (v.validation_type='robust' OR (v.validation_type IN ('human_recompute','human_screen') AND v.evidence_revision=?)) GROUP BY v.validation_type,v.status`,[projectId,cycle,rev]);
   const robustRows=valAgg.filter(v=>v.t==='robust').reduce((a,v)=>a+Number(v.c||0),0);
   const robustConfirmed=Number(valAgg.find(v=>v.t==='robust'&&v.s==='CONFIRM')?.d||0);
   const humanRows=valAgg.filter(v=>v.t==='human_recompute').reduce((a,v)=>a+Number(v.c||0),0);
+  // Matrix-only Human verdicts for Synthetic-confirmed candidates that are not robust-confirmed (never used for approval).
+  const humanScreenRows=valAgg.filter(v=>v.t==='human_screen').reduce((a,v)=>a+Number(v.c||0),0);
+  // Every confirmed_feasible candidate gets a human-reviewer recompute so the Matrix Human column is populated.
+  const humanTargets=Math.max(feasible,robustConfirmed);
   if(robustRows<total){
     if(!(await jobExists(env,projectId,'validate_project'))) await enqueue(env,projectId,'validate_project',{},55);
     await setStage(env,p,'validate');
@@ -198,13 +202,13 @@ export async function advanceProject(env,projectId){
     return {stage:'human_review'};
   }
 
-  if((rn.recompute||0)<robustConfirmed){
+  if((rn.recompute||0)<humanTargets){
     if(!(await jobExists(env,projectId,'recompute_project'))) await enqueue(env,projectId,'recompute_project',{},65);
     await setStage(env,p,'recompute');
     return {stage:'recompute'};
   }
 
-  if(humanRows<robustConfirmed){
+  if(humanRows<robustConfirmed||(humanRows+humanScreenRows)<humanTargets){
     if(!(await jobExists(env,projectId,'finalize_recompute'))) await enqueue(env,projectId,'finalize_recompute',{},80);
     await setStage(env,p,'recompute');
     return {stage:'recompute_finalize'};

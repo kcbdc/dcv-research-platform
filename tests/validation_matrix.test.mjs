@@ -23,13 +23,14 @@ test('External Validation Matrix separates Synthetic/Historical/Adversarial/BIS/
   assert.equal(vm.summary.dimensions.BIS.FAIL,1);assert.equal(vm.summary.dimensions.ECB.HOLD,1);
 });
 
-test('External Validation Matrix keeps unavailable external layers as N/A rather than failure',async()=>{
+test('External Validation Matrix keeps unavailable external layers as N/A and Human as HOLD (pending) rather than failure',async()=>{
   const DB=makeDb(),pid=await seedProject(DB,{candidates:1,reviewer:0,episodes:0}),cid='cand_0',ts=now();
   DB.raw.prepare(`DELETE FROM simulation_runs WHERE project_id=? AND candidate_id=?`).run(pid,cid);
   DB.raw.prepare(`DELETE FROM validations WHERE project_id=? AND candidate_id=?`).run(pid,cid);
   DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision) VALUES('c',?,?, 'confirmation',1,100,?, ?,0)`).run(pid,cid,ev('FEASIBLE',{Synthetic:{classification:'FEASIBLE'}}),ts);
   await refreshValidationMatrix({DB},pid);const x=(await getValidationMatrix({DB},pid)).rows[0];
-  assert.equal(x.synthetic_status,'PASS');assert.equal(x.bis_status,'NA');assert.equal(x.ecb_status,'NA');assert.equal(x.human_status,'NA');assert.equal(x.overall_status,'PARTIAL');
+  // Synthetic passed but no human-reviewer verdict exists yet: insufficient evidence = HOLD, never NA/PASS.
+  assert.equal(x.synthetic_status,'PASS');assert.equal(x.bis_status,'NA');assert.equal(x.ecb_status,'NA');assert.equal(x.human_status,'HOLD');assert.equal(x.overall_status,'HOLD');
 });
 
 test('Figure 7 survival funnel uses strict cumulative PASS and exposes N/A layers safely', async()=>{

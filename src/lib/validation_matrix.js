@@ -5,11 +5,44 @@ const DIMS=['Synthetic','Historical','Adversarial','BIS','ECB','Human'];
 const classStatus=v=>v==='FEASIBLE'?'PASS':v==='INFEASIBLE'?'FAIL':v==='UNRESOLVED'?'HOLD':'NA';
 const validationStatus=v=>v==='CONFIRM'?'PASS':v==='REJECT'?'FAIL':v==='HOLD'?'HOLD':'NA';
 
+// Bump when the status rules change so cached matrix rows are rebuilt once from stored evidence.
+// v2: Human is evaluated for every Synthetic-passing candidate (human_screen) and phase-level
+//     non-inferiority contrasts are no longer ignored by the per-group statuses.
+export const MATRIX_RULES_VERSION=2;
+
+// Phase-level non-inferiority (candidate vs matched K0 baseline) is stored in result.noninferiority and
+// is already part of result.classification, but validation_groups[*].classification is computed before it.
+// Without this gate a candidate that fails non-inferiority could still show PASS in a group cell.
+function noninferiorityGate(result){
+  const cmp=result?.noninferiority?.comparisons;
+  if(!Array.isArray(cmp)||!cmp.length)return 'PASS';
+  let fail=false,hold=false;
+  for(const x of cmp){
+    const lo=Number(x?.lo),hi=Number(x?.hi),lim=Number(x?.limit);
+    if(!Number.isFinite(lo)||!Number.isFinite(hi)||!Number.isFinite(lim)){hold=true;continue;}
+    if(lo>lim)fail=true;else if(hi>lim)hold=true;
+  }
+  return fail?'FAIL':hold?'HOLD':'PASS';
+}
+// exact=true  : the group IS the whole phase (Synthetic, Historical) -> FAIL/HOLD apply directly.
+// exact=false : the group is a subset of the stress phase; a pooled contrast cannot be attributed to one
+//               subset, so it can only stop a PASS (-> HOLD), never create a FAIL.
+export function withNoninferiority(status,result,{exact=false}={}){
+  if(status!=='PASS'&&status!=='HOLD'&&status!=='FAIL')return status;
+  const ni=noninferiorityGate(result);
+  if(ni==='PASS')return status;
+  if(exact){
+    if(ni==='FAIL'||status==='FAIL')return 'FAIL';
+    return 'HOLD';
+  }
+  return status==='PASS'?'HOLD':status;
+}
+
 // Match thesis.js scenario-level evidence fallback. Missing metrics/constraints are
 // HOLD (insufficient evidence), never an invented PASS.
 function scenarioGate(result,group,predicate,constraints){
   const explicit=result?.validation_groups?.[group]?.classification;
-  if(explicit)return classStatus(explicit);
+  if(explicit)return withNoninferiority(classStatus(explicit),result,{exact:false});
   const scenarios=Object.entries(result?.scenario_scores||{}).filter(([key])=>predicate(key));
   if(!scenarios.length)return 'NA';
   const codes=scenarios.map(([,score])=>{
@@ -47,23 +80,45 @@ export async function refreshValidationMatrix(env,projectId,{candidateId=null}={
   const runs=await all(env.DB,`SELECT r.candidate_id,r.phase,r.result_json FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress') AND (? IS NULL OR r.candidate_id=?) ORDER BY r.created_at DESC`,[projectId,cycle,rev,candidateId,candidateId]);
   const targetIds=candidateId?new Set([candidateId]):null;
   const runMap=latestByCandidate(targetIds?runs.filter(r=>targetIds.has(r.candidate_id)):runs);
-  const humans=await all(env.DB,`SELECT candidate_id,status,result_json FROM validations WHERE project_id=? AND evidence_revision=? AND validation_type='human_recompute' AND (? IS NULL OR candidate_id=?) ORDER BY created_at DESC`,[projectId,rev,candidateId,candidateId]);
-  const humanMap=new Map();for(const h of humans)if((!targetIds||targetIds.has(h.candidate_id))&&!humanMap.has(h.candidate_id))humanMap.set(h.candidate_id,h);
+  // Human gate: 'human_recompute' (robust-confirmed candidates, drives approval) wins over 'human_screen'
+  // (same current-revision reviewer-model recompute for every other Synthetic-passing candidate, display only).
+  const humans=await all(env.DB,`SELECT candidate_id,validation_type,status,result_json FROM validations WHERE project_id=? AND evidence_revision=? AND validation_type IN ('human_recompute','human_screen') AND (? IS NULL OR candidate_id=?) ORDER BY created_at DESC`,[projectId,rev,candidateId,candidateId]);
+  const humanMap=new Map();
+  for(const h of humans){
+    if(targetIds&&!targetIds.has(h.candidate_id))continue;
+    const cur=humanMap.get(h.candidate_id);
+    if(!cur||(cur.validation_type==='human_screen'&&h.validation_type==='human_recompute'))humanMap.set(h.candidate_id,h);
+  }
+  // Read lazily: only needed to explain why a Synthetic-passing candidate has no Human verdict yet.
+  let reviewerModelReady=null;
+  const hasReviewerModel=async()=>{
+    if(reviewerModelReady===null)reviewerModelReady=!!(await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,cycle,rev]));
+    return reviewerModelReady;
+  };
   const ts=nowIso(),stmts=[];let pass=0,fail=0,hold=0,partial=0;
   for(const c of cands){
     const conf=safeJson(runMap.get(`${c.id}|confirmation`)?.result_json,{}),hist=safeJson(runMap.get(`${c.id}|historical`)?.result_json,{}),stress=safeJson(runMap.get(`${c.id}|stress`)?.result_json,{}),h=humanMap.get(c.id);
     const groups=stress.validation_groups||{};
     const row={
-      synthetic_status:classStatus(conf.validation_groups?.Synthetic?.classification||conf.classification),
-      historical_status:classStatus(hist.validation_groups?.Historical?.classification||hist.classification),
+      synthetic_status:withNoninferiority(classStatus(conf.validation_groups?.Synthetic?.classification||conf.classification),conf,{exact:true}),
+      historical_status:withNoninferiority(classStatus(hist.validation_groups?.Historical?.classification||hist.classification),hist,{exact:true}),
       adversarial_status:scenarioGate(stress,'Adversarial',k=>!/^official_(bis|ecb)_/i.test(k),constraints),
       bis_status:scenarioGate(stress,'BIS',k=>/^official_bis_/i.test(k),constraints),
       ecb_status:scenarioGate(stress,'ECB',k=>/^official_ecb_/i.test(k),constraints),
-      human_status:h?validationStatus(h.status):'NA'
+      human_status:'NA'
     };
+    // Human: real verdict when a recompute/screen row exists. A Synthetic-passing candidate without one is
+    // HOLD (insufficient human evidence), never NA and never an invented PASS. Candidates that did not pass
+    // Synthetic confirmation are never sent to the human gate, so they stay NA.
+    let humanDetail=null;
+    if(h){row.human_status=validationStatus(h.status);humanDetail={status:h.status,source:h.validation_type,result:safeJson(h.result_json,{})};}
+    else if(row.synthetic_status==='PASS'){
+      row.human_status='HOLD';
+      humanDetail={status:'HOLD',source:'pending',reason:(await hasReviewerModel())?'HUMAN_RECOMPUTE_PENDING':'HUMAN_REVIEWER_MODEL_PENDING',result:{}};
+    }
     row.overall_status=overall(row);
     if(row.overall_status==='PASS')pass++;else if(row.overall_status==='FAIL')fail++;else if(row.overall_status==='HOLD')hold++;else partial++;
-    const detail={synthetic:conf.validation_groups?.Synthetic||null,historical:hist.validation_groups?.Historical||null,adversarial:groups.Adversarial||null,bis:groups.BIS||null,ecb:groups.ECB||null,human:h?{status:h.status,result:safeJson(h.result_json,{})}:null};
+    const detail={synthetic:conf.validation_groups?.Synthetic||null,historical:hist.validation_groups?.Historical||null,adversarial:groups.Adversarial||null,bis:groups.BIS||null,ecb:groups.ECB||null,human:humanDetail,rules_version:MATRIX_RULES_VERSION};
     stmts.push(env.DB.prepare(`INSERT INTO candidate_validation_matrix(id,project_id,candidate_id,research_cycle,evidence_revision,synthetic_status,historical_status,adversarial_status,bis_status,ecb_status,human_status,overall_status,detail_json,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,candidate_id,research_cycle,evidence_revision) DO UPDATE SET synthetic_status=excluded.synthetic_status,historical_status=excluded.historical_status,adversarial_status=excluded.adversarial_status,bis_status=excluded.bis_status,ecb_status=excluded.ecb_status,human_status=excluded.human_status,overall_status=excluded.overall_status,detail_json=excluded.detail_json,updated_at=excluded.updated_at`).bind(uid('vmat'),projectId,c.id,cycle,rev,row.synthetic_status,row.historical_status,row.adversarial_status,row.bis_status,row.ecb_status,row.human_status,row.overall_status,JSON.stringify(detail),ts));
   }
   for(let i=0;i<stmts.length;i+=50)await env.DB.batch(stmts.slice(i,i+50));
@@ -84,7 +139,7 @@ export async function getValidationMatrix(env,projectId){
     (SELECT MAX(r.created_at) FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id
       WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase IN ('confirmation','historical','stress')) latest_run,
     (SELECT MAX(v.created_at) FROM validations v JOIN design_candidates c ON c.id=v.candidate_id
-      WHERE v.project_id=? AND c.research_cycle=? AND v.evidence_revision=? AND v.validation_type='human_recompute') latest_human`,
+      WHERE v.project_id=? AND c.research_cycle=? AND v.evidence_revision=? AND v.validation_type IN ('human_recompute','human_screen')) latest_human`,
     [projectId,currentCycle,projectId,currentCycle,currentRev,projectId,currentCycle,currentRev]);
   const cachedTime=rows.reduce((m,r)=>String(r.updated_at||'')>m?String(r.updated_at):m,'');
   const newEvidence=[source?.latest_run,source?.latest_human].some(t=>String(t||'')>cachedTime);
@@ -104,7 +159,10 @@ export async function getValidationMatrix(env,projectId){
     });
   }
 
-  if(Number(source?.candidates||0)>0 && (rows.length!==Number(source.candidates)||newEvidence||legacyScenarioCache)){
+  // Rows cached by an older rule set (e.g. Human always N/A for non-robust candidates) are rebuilt once
+  // from stored evidence; refreshed rows carry rules_version so this cannot loop.
+  const legacyRules=rows.some(r=>Number(safeJson(r.detail_json,{}).rules_version||0)!==MATRIX_RULES_VERSION);
+  if(Number(source?.candidates||0)>0 && (rows.length!==Number(source.candidates)||newEvidence||legacyScenarioCache||legacyRules)){
     await refreshValidationMatrix(env,projectId);
     rows=await matrixRows(env,projectId,currentCycle,currentRev);
   }

@@ -24,12 +24,14 @@ export async function researchDashboard(env,id){
  const sourceTests=att?.status==='PASS'?'PASS':att?.status==='FAIL'?'FAIL':'UNVERIFIED'; const orphan=await one(env.DB,`SELECT COUNT(*) n FROM validations v WHERE v.project_id=? AND v.evidence_revision=? AND v.candidate_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM design_candidates c WHERE c.id=v.candidate_id AND c.project_id=v.project_id AND c.research_cycle=?)`,[id,revision,cycle]);
  const protocolHashValid=protocol?.protocol_hash?await sha256Hex(stableStringify(protocol.protocol))===protocol.protocol_hash:null;
  const liveChecks={current_matrix:current&&matrix.rows.length>0,orphan_current_validations:Number(orphan?.n||0),protocol_hash_valid:protocolHashValid};
- const system=sourceTests==='FAIL'||liveChecks.orphan_current_validations>0||protocolHashValid===false?'FAIL':'UNVERIFIED';
+ const system=systemVerdict(sourceTests,liveChecks);
  const effects=gridEffects(contrasts);
  const stop=await stoppingStatus(env,id,cycle);const confirm=await currentFinal(env,id);
  const verdicts=confirm?.result?.region_propositions;
  const statuses=Object.entries(propositions).map(([id,label])=>({id,label,status:system==='FAIL'?'INCONCLUSIVE':verdicts?.[id]||'INCONCLUSIVE',scope:'registered computational grid only',...(id==='P1'?{exploratory:matchedSigma(contrasts)}:{})}));
- const recommendation=system==='FAIL'?'CONTINUE_REPAIR':stop?.budget_reached?'PIVOT_REVIEW':verdicts&&statuses.every(h=>h.status!=='INCONCLUSIVE')?'COMPLETE_COMPUTATION_REVIEW':'CONTINUE';
+ const recommendation=system==='FAIL'?'CONTINUE_REPAIR':system!=='PASS'?'CONTINUE_VERIFY':verdicts&&statuses.every(h=>h.status!=='INCONCLUSIVE')?'COMPLETE_COMPUTATION_REVIEW':stop?.budget_reached?'PIVOT_REVIEW':'CONTINUE';
  const latest=await one(env.DB,'SELECT research_cycle,evidence_revision FROM projects WHERE id=?',[id]);if(Number(latest.research_cycle)!==cycle||Number(latest.evidence_revision)!==revision)throw Error('evidence_changed_retry');
  return {cycle,revision,confirmatory_computation:confirm,system,live_checks:liveChecks,source_tests:sourceTests,candidates:current?matrix.summary:null,candidate_basis:current?'CURRENT':'STALE',boundary_plan:boundaryPlan(contrasts),grid_effects:effects,hypotheses:statuses,sensitivity:sensitivity(used,safeJson(cfg?.constraints_json,{})),loss_policy:safeJson(cfg?.benchmark_json,{}).loss_policy||{mode:'baseline'},protocol_hash:protocol?.protocol_hash||null,replication_status:replication.status,stopping:stop,recommendation,recommendation_basis:'Advisory only; computational completion is not scientific completion; live system integrity and independent empirical evidence remain separate'};
 }
+
+export function systemVerdict(source,checks){return source==='FAIL'||checks.orphan_current_validations>0||checks.protocol_hash_valid===false?'FAIL':source==='PASS'&&checks.current_matrix&&checks.orphan_current_validations===0&&checks.protocol_hash_valid===true?'PASS':'UNVERIFIED';}

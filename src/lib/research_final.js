@@ -1,7 +1,7 @@
 import {all,one,run,enqueueOnce} from './db.js';
 import {hashString,sha256Hex,safeJson,nowIso} from './util.js';
 import {freezeConfirm,runConfirm,calibrateLoss} from './research_confirm.js';
-import {gridEffects} from './research_effects.js';
+import {gridEffects,kstarEffects} from './research_effects.js';
 import {latestDefinition} from './define.js';
 import {latestProtocol} from './rigor.js';
 import {loadEmpiricalCalibration} from './empirical.js';
@@ -12,12 +12,12 @@ const finite=Number.isFinite;
 export function regionVerdicts(result,effects,p2Definition=null){
  const rows=result.region.map(r=>({...r.candidate,verdict:r.actual}));
  const g=gridEffects(rows); const verdict=(lo,hi,r)=>!finite(lo)||!finite(hi)||!r?'INCONCLUSIVE':(r.direction===1?lo:-hi)>r.minimum?'SUPPORTED':(r.direction===1?hi:-lo)<r.minimum?'REFUTED':'INCONCLUSIVE';
- const p2=Object.entries(g.P2).map(([axis,q])=>[axis,verdict(q.lower,q.upper,effects.P2_axes?.[axis])]);
+ const kg=kstarEffects(result.region);const p2=Object.entries(p2Definition==='kstar_grid_v1'?kg:g.P2).map(([axis,q])=>[axis,verdict(q.lower,q.upper,effects.P2_axes?.[axis])]);
  const registered=effects.P2_axes?Object.fromEntries(p2):null;
- const primary=registered&&['alpha','delay_d','authority_k'].map(k=>registered[k]);
+ const primary=registered&&(p2Definition==='kstar_grid_v1'?['alpha','delay_d']:['alpha','delay_d','authority_k']).map(k=>registered[k]);
  const p2Status=primary?(primary.every(v=>v==='SUPPORTED')?'SUPPORTED':primary.some(v=>v==='REFUTED')?'REFUTED':'INCONCLUSIVE'):'INCONCLUSIVE';
  const n=result.region.length, x=result.subset.expansion,u=result.subset.unknown;
- return {P1:verdict(g.P1.lower,g.P1.upper,effects.P1),P2:p2Definition==='finite_grid_signed_interactions_v1'?p2Status:'INCONCLUSIVE',P2_definition:p2Definition,P2_registered_signed_contrasts:p2Status,P2_axes:registered,P3:result.hypotheses.P3,P4:x>0?'REFUTED':n>0&&u===0?'SUPPORTED':'INCONCLUSIVE',bounds:g,scope:'fixed registered grid; simultaneous computational intervals; P2 requires all three signed contrasts; P4 subset (equality allowed); no external validity claim'};
+ return {P1:verdict(g.P1.lower,g.P1.upper,effects.P1),P2:['finite_grid_signed_interactions_v1','kstar_grid_v1'].includes(p2Definition)?p2Status:'INCONCLUSIVE',P2_definition:p2Definition,P2_registered_signed_contrasts:p2Status,P2_axes:registered,P3:result.hypotheses.P3,P4:x>0?'REFUTED':n>0&&u===0?'SUPPORTED':'INCONCLUSIVE',bounds:g,kstar_bounds:kg,scope:'fixed registered grid; simultaneous computational intervals; P2 uses explicitly registered definition; Kstar uses two slope contrasts; P4 subset (equality allowed); no external validity claim'};
 }
 export async function freezeFinal(env,id,input){
  const p=await one(env.DB,'SELECT research_cycle,evidence_revision FROM projects WHERE id=?',[id]);if(!p)throw Error('project_not_found');
@@ -34,7 +34,7 @@ export async function freezeFinal(env,id,input){
  const prior=await all(env.DB,'SELECT spec_json FROM research_confirm_jobs WHERE project_id=?',[id]);const seeds=new Set(runs.map(r=>r.seed));for(const r of prior){const s=safeJson(r.spec_json,{});for(let i=0;i<(s.adaptive_looks?.at(-1)||s.blocks);i++)seeds.add(hashString(`${s.namespace}|confirm-v1|${i}`));}
  if(!seeds.size)throw Error('source_runs_required');
  if(!Number.isSafeInteger(input.blocks)||input.blocks<2||unique.length*(input.adaptive_looks?.at(-1)||input.blocks)*config.horizon>30000000)throw Error('compute_budget_exceeded');
- const namespace=crypto.randomUUID();const spec={grid:unique,scenarios,sourceSeeds:[...seeds],sourceRuns:runs,blocks:input.blocks,namespace,reviewer:safeJson(rm.model_json,{}),config,constraints:configDef.content.constraints,effects:input.effects,bounds:input.bounds,interactionAxis:'alpha',adaptive_looks:input.adaptive_looks||null,p2_definition:input.p2_definition||null,cost_provenance:input.cost_rows||null,protocol_hash:protocol.protocol_hash,cycle,revision};
+ const namespace=crypto.randomUUID();const spec={grid:unique,scenarios,sourceSeeds:[...seeds],sourceRuns:runs,blocks:input.blocks,namespace,reviewer:safeJson(rm.model_json,{}),config,constraints:configDef.content.constraints,effects:input.effects,bounds:input.bounds,interactionAxis:'alpha',adaptive_looks:input.adaptive_looks||null,selective_boundary:true,p2_definition:input.p2_definition||null,cost_provenance:input.cost_rows||null,protocol_hash:protocol.protocol_hash,cycle,revision};
  if(new TextEncoder().encode(JSON.stringify(spec)).length>1800000)throw Error("frozen_snapshot_too_large");const frozen=await freezeConfirm(spec);const latest=await one(env.DB,'SELECT research_cycle,evidence_revision FROM projects WHERE id=?',[id]);if(Number(latest.research_cycle)!==cycle||Number(latest.evidence_revision)!==revision)throw Error('evidence_changed_retry');
  await run(env.DB,`INSERT INTO research_confirm_jobs(project_id,cycle,revision,hash,spec_json,created_at) VALUES(?,?,?,?,?,?)`,[id,cycle,revision,frozen.hash,JSON.stringify(spec),nowIso()]);return {hash:frozen.hash,cycle,revision,grid:unique.length,blocks:spec.blocks};
 }

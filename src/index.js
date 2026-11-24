@@ -432,7 +432,7 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env,ctx);
     return env.ASSETS.fetch(request);
   },
-  async scheduled(controller,env,ctx){ ctx.waitUntil((async()=>{ await scheduleAll(env,{process:false}); await processFastLane(env,{rounds:3}); await recoverHybridStall(env,{reason:'worker_cron'}); await scheduleLab(env); if(new Date(controller.scheduledTime||Date.now()).getUTCMinutes()%5===0)await collectOfficialInline(env,{limit:2}).catch(()=>null); })()); },
+  async scheduled(controller,env,ctx){ ctx.waitUntil((async()=>{ await Promise.allSettled([scheduleLab(env), (async()=>{await scheduleAll(env,{process:false}); await processFastLane(env,{rounds:3}); await recoverHybridStall(env,{reason:'worker_cron'});})()]); if(new Date(controller.scheduledTime||Date.now()).getUTCMinutes()%5===0)await collectOfficialInline(env,{limit:2}).catch(()=>null); })()); },
   async queue(batch,env,ctx){
     for(const message of batch.messages){
       try{ const out=await processJobs(env); if(!out.length&&String(env.COMPUTE_EXECUTOR||'')==='hybrid')await recoverHybridStall(env,{reason:'queue_wake'}); message.ack(); }

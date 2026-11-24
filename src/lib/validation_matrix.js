@@ -8,7 +8,7 @@ const validationStatus=v=>v==='CONFIRM'?'PASS':v==='REJECT'?'FAIL':v==='HOLD'?'H
 // Bump when the status rules change so cached matrix rows are rebuilt once from stored evidence.
 // v2: Human is evaluated for every Synthetic-passing candidate (human_screen) and phase-level
 //     non-inferiority contrasts are no longer ignored by the per-group statuses.
-export const MATRIX_RULES_VERSION=2;
+export const MATRIX_RULES_VERSION=3;
 
 // Phase-level non-inferiority (candidate vs matched K0 baseline) is stored in result.noninferiority and
 // is already part of result.classification, but validation_groups[*].classification is computed before it.
@@ -47,15 +47,12 @@ function scenarioGate(result,group,predicate,constraints){
   if(!scenarios.length)return 'NA';
   const codes=scenarios.map(([,score])=>{
     if(score?.classification)return classStatus(score.classification);
-    const checks=[];
-    for(const [metric,limit] of [['loss_mean','loss_max'],['loss_exceed_rate','loss_exceed_max'],['fp_rate','fp_max'],['fn_rate','fn_max'],['review_burden','review_burden_max'],['recovery_time','recovery_time_max']]){
-      if(score?.[metric]!=null&&constraints?.[limit]!=null&&Number.isFinite(Number(score[metric]))&&Number.isFinite(Number(constraints[limit]))) checks.push(Number(score[metric])<=Number(constraints[limit]));
-    }
-    return !checks.length?'HOLD':checks.every(Boolean)?'PASS':'FAIL';
+    // Legacy point estimates alone cannot establish a confidence-bound failure or pass.
+    return 'HOLD';
   });
   if(codes.includes('FAIL'))return 'FAIL';
   if(codes.includes('HOLD')||codes.includes('NA'))return 'HOLD';
-  return codes.every(c=>c==='PASS')?'PASS':'HOLD';
+  return withNoninferiority(codes.every(c=>c==='PASS')?'PASS':'HOLD',result,{exact:false});
 }
 
 function overall(row){
@@ -118,7 +115,7 @@ export async function refreshValidationMatrix(env,projectId,{candidateId=null}={
     }
     row.overall_status=overall(row);
     if(row.overall_status==='PASS')pass++;else if(row.overall_status==='FAIL')fail++;else if(row.overall_status==='HOLD')hold++;else partial++;
-    const detail={synthetic:conf.validation_groups?.Synthetic||null,historical:hist.validation_groups?.Historical||null,adversarial:groups.Adversarial||null,bis:groups.BIS||null,ecb:groups.ECB||null,human:humanDetail,rules_version:MATRIX_RULES_VERSION};
+    const detail={failed_dimensions:DIMS.filter(k=>row[k.toLowerCase()+'_status']==='FAIL'),pending_dimensions:DIMS.filter(k=>['HOLD','NA'].includes(row[k.toLowerCase()+'_status'])),synthetic:conf.validation_groups?.Synthetic||null,historical:hist.validation_groups?.Historical||null,adversarial:groups.Adversarial||null,bis:groups.BIS||null,ecb:groups.ECB||null,human:humanDetail,rules_version:MATRIX_RULES_VERSION};
     stmts.push(env.DB.prepare(`INSERT INTO candidate_validation_matrix(id,project_id,candidate_id,research_cycle,evidence_revision,synthetic_status,historical_status,adversarial_status,bis_status,ecb_status,human_status,overall_status,detail_json,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,candidate_id,research_cycle,evidence_revision) DO UPDATE SET synthetic_status=excluded.synthetic_status,historical_status=excluded.historical_status,adversarial_status=excluded.adversarial_status,bis_status=excluded.bis_status,ecb_status=excluded.ecb_status,human_status=excluded.human_status,overall_status=excluded.overall_status,detail_json=excluded.detail_json,updated_at=excluded.updated_at`).bind(uid('vmat'),projectId,c.id,cycle,rev,row.synthetic_status,row.historical_status,row.adversarial_status,row.bis_status,row.ecb_status,row.human_status,row.overall_status,JSON.stringify(detail),ts));
   }
   for(let i=0;i<stmts.length;i+=50)await env.DB.batch(stmts.slice(i,i+50));

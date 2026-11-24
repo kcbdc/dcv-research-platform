@@ -113,7 +113,7 @@ export async function claimJobs(env, limit=4) {
   let laneSql=laneSqlFor(lane);
   // recoverHybridStall() sets EMERGENCY_WORKER_COMPUTE when GitHub Actions never picked up queued work. The flag was
   // previously ignored, so the fallback claimed nothing. Light I/O-bound collectors may now run on the Worker.
-  if(lane==='worker-hybrid'&&env.EMERGENCY_WORKER_COMPUTE==='1')laneSql=laneSql.replace(/ AND type IN \((.*)\)$/,` AND (type IN ($1) OR type='collect_project')`);
+  if(lane==='worker-hybrid'&&env.EMERGENCY_WORKER_COMPUTE==='1')laneSql=laneSql.replace(/ AND type IN \((.*)\)$/,` AND (type IN ($1) OR type='collect_project' OR (type='compute_candidate' AND phase='exploration'))`);
   // An oversized collector must not block smaller compute jobs behind it. In hybrid mode,
   // the same indexed queue is partitioned by job type so Worker and Actions never steal each other's work.
   // Once a candidate has passed confirmation, process its actual evidence gates
@@ -122,10 +122,11 @@ export async function claimJobs(env, limit=4) {
   // This is scheduling only: no change to scientific PASS/FAIL criteria.
   const laneOrder=lane==='github-hybrid'
     ? `CASE
-      WHEN type='compute_candidate' AND phase IN ('historical','stress') THEN 0
-      WHEN type='compute_candidate' AND phase='confirmation' THEN 1
-      WHEN type='compute_candidate' AND phase='refinement' THEN 2
-      WHEN type='compute_candidate' THEN 3
+      WHEN type='compute_candidate' AND phase='exploration' AND julianday(created_at)<=julianday('now','-15 minutes') THEN 0
+      WHEN type='compute_candidate' AND phase IN ('historical','stress') THEN 1
+      WHEN type='compute_candidate' AND phase='confirmation' THEN 2
+      WHEN type='compute_candidate' AND phase='refinement' THEN 3
+      WHEN type='compute_candidate' THEN 4
       WHEN type IN ('validate_project','fit_reviewer') THEN 4
       WHEN type IN (${SHARED_FAST_JOB_TYPES.map(x=>`'${x}'`).join(',')}) THEN 6
       ELSE 5 END,`

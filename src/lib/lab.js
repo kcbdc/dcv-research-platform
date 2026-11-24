@@ -9,8 +9,8 @@ import {earlyManuscriptStatements} from './lab_manuscript_seed.js';
 
 const MAX_ATTEMPTS=3,LEASE_MS=240000;
 // The manuscript deadline is a stop date, not a quota that spreads out research work.
-// One role per tick and a 60-minute minimum interval prevent aggressive quota consumption.
-export const LAB_ACTIVE_CADENCE_MS=60*60*1000;
+// One role per tick and a 15-minute minimum interval prevent aggressive quota consumption.
+export const LAB_ACTIVE_CADENCE_MS=15*60*1000;
 const safeConfig=campaign=>safeJson(campaign.config_json);
 export const nextTime=(c,cursor,now=Date.now())=>{
  // Never slow daily work merely because the final deadline has been extended.
@@ -124,7 +124,7 @@ export async function processLabTick(env){
  // A research-foundation HOLD is expected scientific state, not an operational failure.
  // Older builds escalated four HOLD retries to `attention`, which stopped the scheduler forever.
  const recoverAt=nowIso();
- await run(env.DB,`UPDATE lab_campaigns SET status='active',error_count=0,next_run_at=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE status='attention' AND last_error LIKE 'Blocked at research_foundation:%'`,[recoverAt,recoverAt]);
+ await run(env.DB,`UPDATE lab_campaigns SET status='active',error_count=0,next_run_at=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE status='attention' AND last_error LIKE 'Blocked at research_foundation:%' AND (lease_until IS NULL OR lease_until<?)`,[recoverAt,recoverAt,recoverAt]);
  // At most ONE campaign/task per Cron invocation. Claim through UPDATE RETURNING.
  // An expired lease is recoverable after termination; stale attempts cannot commit.
  const now=nowIso(),token=uid('lease'),until=new Date(Date.now()+LEASE_MS).toISOString();
@@ -186,7 +186,7 @@ export async function processLabTick(env){
   if(foundationHold){
    const retryAt=new Date(Date.now()+300000).toISOString();
    await env.DB.batch([
-    env.DB.prepare(`UPDATE lab_tasks SET status='retry',error=? WHERE campaign_id=? AND seq=? AND status='running' AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=?)`).bind(message,c.id,c.cursor,c.id,token),
+    env.DB.prepare(`UPDATE lab_tasks SET status='retry',attempts=MAX(attempts-1,0),error=? WHERE campaign_id=? AND seq=? AND status='running' AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=?)`).bind(message,c.id,c.cursor,c.id,token),
     env.DB.prepare(`UPDATE lab_campaigns SET status='active',next_run_at=?,last_error=?,error_count=0,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?`).bind(retryAt,message,nowIso(),c.id,token)
    ]);
    bust(env,c.project_id,'lab:status');return {status:'foundation_hold',error:message};

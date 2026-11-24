@@ -27,11 +27,11 @@ test('extension never steals an active Worker lease',async()=>{
  await assert.rejects(extendLabDeadline(env,db.prepare('SELECT * FROM lab_campaigns').get(),{deadline_at:deadline}),/currently running/);
  assert.equal(db.prepare('SELECT lease_token FROM lab_campaigns').get().lease_token,'live');
 });
-test('next work follows an hourly ceiling rather than being spread over deadline',()=>{
+test('next work follows a 15-minute ceiling rather than being spread over deadline',()=>{
  const now=Date.parse('2026-11-18T04:00:00Z');
  const c={starts_at:'2026-11-12T00:00:00Z',deadline_at:deadline,total_tasks:300};
- assert.equal(nextTime(c,17,now),'2026-11-18T05:00:00.000Z');
- assert.equal(nextTime(c,299,now),'2026-11-18T05:00:00.000Z');
+ assert.equal(nextTime(c,17,now),'2026-11-18T04:15:00.000Z');
+ assert.equal(nextTime(c,299,now),'2026-11-18T04:15:00.000Z');
 });
 test('early finalization rejects incomplete evidence without changing cursor or activity',async()=>{
  const env=await fixture(),db=env.DB.raw;

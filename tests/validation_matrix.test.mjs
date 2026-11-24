@@ -153,3 +153,11 @@ test('per-candidate write-through refresh updates only the completed candidate a
   assert.equal(a.historical_status,'PASS');
   assert.equal(b.synthetic_status,'FAIL');
 });
+
+test('legacy point estimate above a constraint is HOLD, not statistically confirmed FAIL',async()=>{
+ const DB=makeDb(),pid=await seedProject(DB,{candidates:1,reviewer:0,episodes:0}),cid='cand_0';
+ DB.raw.prepare('DELETE FROM simulation_runs WHERE project_id=?').run(pid);
+ DB.raw.prepare('UPDATE project_config SET constraints_json=? WHERE project_id=?').run(JSON.stringify({loss_max:0.1}),pid);
+ DB.raw.prepare(`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at,evidence_revision) VALUES('legacy_high',?,?,'stress',1,3,?,?,0)`).run(pid,cid,JSON.stringify({scenario_scores:{official_bis_sample:{loss_mean:9}}}),now());
+ const r=(await getValidationMatrix({DB},pid)).rows[0];assert.equal(r.bis_status,'HOLD');assert.ok(r.detail.pending_dimensions.includes('BIS'));
+});

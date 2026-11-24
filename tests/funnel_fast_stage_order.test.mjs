@@ -25,3 +25,12 @@ test('legacy single-executor scheduling retains its existing priority contract',
   const claimed=await claimJobs(env,2);
   assert.deepEqual(claimed.map(j=>j.phase),['exploration','stress']);
 });
+
+test('aged exploration receives service before fresh robust work',async()=>{
+ const DB=makeDb(),id=await seedProject(DB,{candidates:1,reviewer:0,episodes:0});
+ DB.raw.exec('DELETE FROM jobs');const env={DB,COMPUTE_EXECUTOR:'hybrid',EXTERNAL_RUNTIME:'github-actions'};
+ await enqueue(env,id,'compute_candidate',{candidate_id:'a',phase:'exploration'},40);
+ DB.raw.exec("UPDATE jobs SET created_at=datetime('now','-20 minutes')");
+ await enqueue(env,id,'compute_candidate',{candidate_id:'b',phase:'stress'},49);
+ assert.equal((await claimJobs(env,1))[0].phase,'exploration');
+});

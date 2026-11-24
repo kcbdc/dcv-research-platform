@@ -1,3 +1,4 @@
+import {lossPolicy,stepLoss} from './loss_engine.js';
 import { all, one, run, audit, enqueue, enqueueOnce, enqueueMany, enqueueComputeOnce } from './db.js';
 import { latestDefinition } from './define.js';
 import { nowIso, uid, mulberry32, randn, clamp, safeJson, hashString, mean, sha256Hex, stableStringify } from './util.js';
@@ -114,7 +115,9 @@ function reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,delayBase,de
   const base=Math.max(0,Number(delayBase||0))+Math.max(0,Number(reviewer?.mean_delay||0))/86400;
   return {finalStop,delay:Math.max(0,base*delayMult*(.85+.3*rng())),falseAccept,correctOverride};
 }
+const BASE_LOSS_WEIGHTS=lossPolicy().weights;
 function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mulberry32(20261002)){
+  const weights=config.loss_policy?.weights||BASE_LOSS_WEIGHTS;
   const horizon=Number(config.horizon||24), tau=Math.max(0,Math.round(c.tau||0));
   const threshold=Number(scenario.risk_threshold_override??config.risk_threshold??.68), latentThreshold=Math.log(threshold/(1-threshold));
   const history=[], est={x:0,p:1,var:Math.max(c.sigma*c.sigma,scenario.process_noise**2),predictionVariance:Math.max(c.sigma*c.sigma,scenario.process_noise**2),change:false};
@@ -171,15 +174,11 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
     const cFP=Number(lossCal.c_fp??.0592)*Number(scenario.c_fp_multiplier??1), cFN=Number(lossCal.c_fn??.0832)*Number(scenario.c_fn_multiplier??1), T=Number(lossCal.horizon??horizon);
     // FP = 정지 오판(정상지급 차단), FN = 정지 누락(부정지급·유출).
     // 비용은 n=81 위기 패널의 실패/비실패 집단 평균 peak_outflow로 보정한다.
-    const decisionLoss=(finalStop&&!shouldStop?cFP:0)+(!finalStop&&shouldStop?cFN:0);
-    const exposure=(!finalStop?cFN*riskExcess*(1+(queueMode?0:decisionDelay/Math.max(1,T))):0);
-    const delayLoss=queueMode?0:(decisionDelay/Math.max(1,T))*(finalStop?cFP:cFN);   // queue 모드에서는 지연이 집행 시점 이동으로 이미 반영됨(이중계산 방지)
-    let loss=(decisionLoss+exposure+delayLoss)*Number(scenario.loss_multiplier||1);
-    if(needsReview) loss+=Number(lossCal.review_cost??cFP/Math.max(1,T));
+    const {loss,exposure}=stepLoss({finalStop,shouldStop,cFP,cFN,riskExcess,queueMode,decisionDelay,T,multiplier:Number(scenario.loss_multiplier||1),needsReview,reviewCost:Number(lossCal.review_cost??cFP/Math.max(1,T))},weights);
     totalLoss+=loss; rtSum+=decisionDelay; decisions++;
     // Recovery: error EWMA(recAlpha)는 설계 파라미터이며, 비용 스케일만 n=81 패널에서 보정한다.
     if((rollingErrors>Number(c.adjust_m)||exposure>Number(c.recovery_w)) && safeMode===0){
-      safeMode=Math.max(1,Math.round(2+3*c.recovery_w)); adjustmentN++; totalLoss+=Number(lossCal.adjustment_cost??cFN/Math.max(1,T));
+      safeMode=Math.max(1,Math.round(2+3*c.recovery_w)); adjustmentN++; totalLoss+=Number(lossCal.adjustment_cost??cFN/Math.max(1,T))*weights.recovery;
     }
     if(safeMode>0) safeMode--;
   }
@@ -251,7 +250,7 @@ function applyNoninferiority(ev,candidate,baseline,margins){
 }
 function configFrom(def,env,cal){
   const b=def.content.benchmark||{}, v=def.content.validation||{};
-  return {confidence_method:b.confidence_method||'residual_common_v1',delay_mode:b.delay_mode||'queue_v1',replication_mode:b.replication_mode||null,replication_seed_salt:b.replication_seed_salt||null,replication_scenario_salt:b.replication_scenario_salt||null,replication_scenario_mode:b.replication_scenario_mode||null,autonomous_delay_days:Number(b.autonomous_delay_days??.02),noninferiority:b.noninferiority||null,horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation??2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
+  return {loss_policy:lossPolicy(b.loss_policy),confidence_method:b.confidence_method||'residual_common_v1',delay_mode:b.delay_mode||'queue_v1',replication_mode:b.replication_mode||null,replication_seed_salt:b.replication_seed_salt||null,replication_scenario_salt:b.replication_scenario_salt||null,replication_scenario_mode:b.replication_scenario_mode||null,autonomous_delay_days:Number(b.autonomous_delay_days??.02),noninferiority:b.noninferiority||null,horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation??2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
 }
 function designDims(d){
   const dims=['sigma','tau','alpha','K','d','W','m'].map(k=>({k,vals:(d[k]&&d[k].length?d[k]:[0]).map(Number)}));
@@ -440,7 +439,7 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   if(Number(currentScope?.research_cycle||1)!==projectCycle||Number(currentScope?.evidence_revision||0)!==projectRev)throw new Error('compute_scope_changed_during_run');
   const resultHash=saved?ev.result_hash:await sha256Hex(stableStringify({seed,phase,cycle,projectRev,raw:batch,metrics:m}));
   await env.DB.batch([
-    env.DB.prepare(`INSERT OR IGNORE INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,result_hash:resultHash,raw:saved?ev.raw:batch,cycle,runner_code_revision:env.RUNNER_CODE_REVISION||null,engine_version:ENGINE_VERSION,delay_mode:config.delay_mode,confidence_method:config.confidence_method,candidate_role:c.candidate_role,reviewer_source:fittedReviewer?'current_revision_human_model':'preregistered_degraded_reviewer_v1',estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:config.replication_mode==='independent_replication_v1'&&['confirmation','recompute'].includes(phase)?`${scenarioPack.source}+independent_holdout_v1`:scenarioPack.source,replication_mode:config.replication_mode||null,replication_seed_namespace:config.replication_mode==='independent_replication_v1'?'independent':null,replication_scenario_mode:config.replication_scenario_mode||null,protocol_hash:protocolAttestation?.protocol_hash||null,protocol_definition_version:protocolAttestation?.definition_version??null,protocol_attested_at_run:true,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev),
+    env.DB.prepare(`INSERT OR IGNORE INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,result_hash:resultHash,raw:saved?ev.raw:batch,cycle,runner_code_revision:env.RUNNER_CODE_REVISION||null,engine_version:ENGINE_VERSION,loss_policy:config.loss_policy,delay_mode:config.delay_mode,confidence_method:config.confidence_method,candidate_role:c.candidate_role,reviewer_source:fittedReviewer?'current_revision_human_model':'preregistered_degraded_reviewer_v1',estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:config.replication_mode==='independent_replication_v1'&&['confirmation','recompute'].includes(phase)?`${scenarioPack.source}+independent_holdout_v1`:scenarioPack.source,replication_mode:config.replication_mode||null,replication_seed_namespace:config.replication_mode==='independent_replication_v1'?'independent':null,replication_scenario_mode:config.replication_scenario_mode||null,protocol_hash:protocolAttestation?.protocol_hash||null,protocol_definition_version:protocolAttestation?.definition_version??null,protocol_attested_at_run:true,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev),
     env.DB.prepare(`INSERT OR IGNORE INTO candidate_evidence(id,project_id,candidate_id,phase,cycle,classification,boundary_score,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)`).bind(`evidence_${id}`,projectId,candidateId,phase,cycle,ev.classification,ev.boundary_score,JSON.stringify(ev),nowIso())
   ]);
   if(['exploration','refinement'].includes(phase)){

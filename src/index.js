@@ -1,3 +1,4 @@
+import {researchDashboard} from './lib/research_decision.js';
 import {applyRedesign,applyBalancedRedesign} from './lib/redesign.js';
 import {createHumanTrial,recordHumanTrial,submitHumanQuiz,verifyHumanSession,issueHumanInvite,loginHumanInvite,LEGACY_PROTOCOL} from './lib/human_trials.js';
 import { json, nowIso, uid, safeJson } from './lib/util.js';
@@ -336,6 +337,7 @@ async function api(request,env,ctx=null){
     if(parts[3]==='external-validity' && parts[4]==='datasets' && method==='POST'){ try{return json(await registerExternalValidityDataset(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:String(e.message||e)},400);} }
     if(parts[3]==='external-validity' && parts[4]==='evaluations' && method==='POST'){ try{return json(await recordExternalValidityEvaluation(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:String(e.message||e)},400);} }
     if(parts[3]==='reviewer-glmm-package' && method==='GET'){ return json(await buildReviewerGlmmPackage(env,projectId)); }
+    if(parts[3]==='research-decision' && method==='GET'){ return json(await researchDashboard(env,projectId)); }
     if(parts[3]==='replication' && method==='GET'){ return json(await replicationStatus(env,projectId)); }
     if(parts[3]==='replication' && parts[4]==='start' && method==='POST'){ await assertNotHumanFrozen(env,projectId); const b=await bodyJson(request); return json(await startIndependentReplication(env,projectId,b),201); }
     if(parts[3]==='human-freeze' && method==='GET'){ const r=await one(env.DB,`SELECT human_freeze,human_freeze_at,human_freeze_reason,human_freeze_cycle,research_cycle FROM projects WHERE id=?`,[projectId]); return r?json({human_freeze:Number(r.human_freeze||0)===1,human_freeze_at:r.human_freeze_at,human_freeze_reason:r.human_freeze_reason,human_freeze_cycle:r.human_freeze_cycle,research_cycle:Number(r.research_cycle||1)}):json({error:'project_not_found'},404); }

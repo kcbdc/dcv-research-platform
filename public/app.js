@@ -400,3 +400,7 @@ btn.onclick=async()=>{if(!current)return;const on=!state?.human_freeze;
 const info=document.querySelector('#participantCountInfo');if(info&&window.MutationObserver)new MutationObserver(()=>refresh()).observe(info,{childList:true,characterData:true,subtree:true});
 if(typeof setTimeout==='function')setTimeout(refresh,1500);}catch(_){}})();
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bootstrapDCV,{once:true});else bootstrapDCV();
+
+// Explicit refresh avoids extra D1 reads on every dashboard polling cycle.
+$('#researchDecisionLoad')?.addEventListener('click',async()=>{const out=$('#researchDecisionOutput'),id=current;if(!id){out.textContent='프로젝트를 선택하세요.';return;}try{out.textContent='분석 중…';const d=await api(`/api/projects/${encodeURIComponent(id)}/research-decision`);if(current!==id){out.textContent='프로젝트 변경됨. 다시 조회하세요.';return;}out.textContent=JSON.stringify(d,null,2);}catch(e){out.textContent=e.message;}});
+window.addEventListener('dcv:project-loaded',()=>{const out=$('#researchDecisionOutput');if(out)out.textContent='현재 증거 분석 버튼을 눌러 조회하세요.';});

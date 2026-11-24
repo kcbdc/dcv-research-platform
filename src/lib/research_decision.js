@@ -2,7 +2,7 @@ import {currentFinal} from './research_final.js';
 import {gridEffects,boundaryPlan} from './research_effects.js';
 import {matchedSigma,propositions,stoppingStatus,stoppingRecommendation} from './research_followup.js';
 import {all,one,run} from './db.js';
-import {safeJson,nowIso,uid} from './util.js';
+import {safeJson,nowIso,uid,sha256Hex,stableStringify} from './util.js';
 import {getValidationMatrix} from './validation_matrix.js';
 import {latestProtocol} from './rigor.js';
 import {replicationStatus} from './replication.js';
@@ -21,9 +21,15 @@ export async function researchDashboard(env,id){
  const [matrix,cfg,protocol,replication,rows,checks]=await Promise.all([getValidationMatrix(env,id),one(env.DB,'SELECT constraints_json,benchmark_json FROM project_config WHERE project_id=?',[id]),latestProtocol(env,id),replicationStatus(env,id),all(env.DB,`SELECT r.candidate_id,r.result_json,c.sigma,c.tau,c.alpha,c.authority_k,c.delay_d,c.recovery_w,c.adjust_m,c.estimator FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.evidence_revision=? AND r.phase='confirmation' ORDER BY r.created_at DESC,r.id DESC`,[id,cycle,revision]),all(env.DB,"SELECT status,result_json FROM rigor_checks WHERE project_id=? AND check_type='research_system_attestation' ORDER BY created_at DESC LIMIT 20",[id])]);
  const seen=new Set(),used=[],contrasts=[];for(const r of rows){if(seen.has(r.candidate_id))continue;seen.add(r.candidate_id);const j=safeJson(r.result_json,{});used.push(j);const v=j.classification;contrasts.push({...r,boundary_score:j.boundary_score,verdict:v==='FEASIBLE'?'PASS':v==='INFEASIBLE'?'FAIL':'HOLD'});}
  const current=!matrix.stale&&matrix.cycle===cycle&&matrix.revision===revision;const att=checks.find(x=>{const a=safeJson(x.result_json,{});return a.cycle===cycle&&a.revision===revision&&a.code_revision===env.RUNNER_CODE_REVISION&&!!env.RUNNER_CODE_REVISION;});
- const sourceTests=att?.status==='PASS'?'PASS':att?.status==='FAIL'?'FAIL':'UNVERIFIED'; const system=sourceTests==='FAIL'?'FAIL':'UNVERIFIED';
+ const sourceTests=att?.status==='PASS'?'PASS':att?.status==='FAIL'?'FAIL':'UNVERIFIED'; const orphan=await one(env.DB,`SELECT COUNT(*) n FROM validations v WHERE v.project_id=? AND v.evidence_revision=? AND v.candidate_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM design_candidates c WHERE c.id=v.candidate_id AND c.project_id=v.project_id AND c.research_cycle=?)`,[id,revision,cycle]);
+ const protocolHashValid=protocol?.protocol_hash?await sha256Hex(stableStringify(protocol.protocol))===protocol.protocol_hash:null;
+ const liveChecks={current_matrix:current&&matrix.rows.length>0,orphan_current_validations:Number(orphan?.n||0),protocol_hash_valid:protocolHashValid};
+ const system=sourceTests==='FAIL'||liveChecks.orphan_current_validations>0||protocolHashValid===false?'FAIL':'UNVERIFIED';
  const effects=gridEffects(contrasts);
  const stop=await stoppingStatus(env,id,cycle);const confirm=await currentFinal(env,id);
+ const verdicts=confirm?.result?.region_propositions;
+ const statuses=Object.entries(propositions).map(([id,label])=>({id,label,status:system==='FAIL'?'INCONCLUSIVE':verdicts?.[id]||'INCONCLUSIVE',scope:'registered computational grid only',...(id==='P1'?{exploratory:matchedSigma(contrasts)}:{})}));
+ const recommendation=system==='FAIL'?'CONTINUE_REPAIR':stop?.budget_reached?'PIVOT_REVIEW':verdicts&&statuses.every(h=>h.status!=='INCONCLUSIVE')?'COMPLETE_COMPUTATION_REVIEW':'CONTINUE';
  const latest=await one(env.DB,'SELECT research_cycle,evidence_revision FROM projects WHERE id=?',[id]);if(Number(latest.research_cycle)!==cycle||Number(latest.evidence_revision)!==revision)throw Error('evidence_changed_retry');
- return {cycle,revision,confirmatory_computation:confirm,system,source_tests:sourceTests,candidates:current?matrix.summary:null,candidate_basis:current?'CURRENT':'STALE',boundary_plan:boundaryPlan(contrasts),grid_effects:effects,hypotheses:Object.entries(propositions).map(([id,label])=>({id,label,status:'INCONCLUSIVE',reason:'No preregistered effect interval and independent analysis attached',...(id==='P1'?{exploratory:matchedSigma(contrasts)}:{})})),sensitivity:sensitivity(used,safeJson(cfg?.constraints_json,{})),loss_policy:safeJson(cfg?.benchmark_json,{}).loss_policy||{mode:'baseline'},protocol_hash:protocol?.protocol_hash||null,replication_status:replication.status,stopping:stop,recommendation:stoppingRecommendation(system,stop),recommendation_basis:'Budget review only; no automatic termination or confirmatory proposition claim'};
+ return {cycle,revision,confirmatory_computation:confirm,system,live_checks:liveChecks,source_tests:sourceTests,candidates:current?matrix.summary:null,candidate_basis:current?'CURRENT':'STALE',boundary_plan:boundaryPlan(contrasts),grid_effects:effects,hypotheses:statuses,sensitivity:sensitivity(used,safeJson(cfg?.constraints_json,{})),loss_policy:safeJson(cfg?.benchmark_json,{}).loss_policy||{mode:'baseline'},protocol_hash:protocol?.protocol_hash||null,replication_status:replication.status,stopping:stop,recommendation,recommendation_basis:'Advisory only; computational completion is not scientific completion; live system integrity and independent empirical evidence remain separate'};
 }

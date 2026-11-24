@@ -84,13 +84,14 @@ export async function enqueueOnce(env, projectId, type, payload={}, priority=100
   return id;
 }
 
-let lastStaleSweep = 0;
+const staleSweeps = new WeakMap();
 export async function recoverStaleJobs(env, minutes=8) {
   // A Worker killed by a resource limit never reaches finishJob, leaving the job 'running' forever.
-  if (Date.now()-lastStaleSweep < 120000) return;   // 큐 메시지마다가 아니라 isolate 당 2분에 1회만 점검
-  lastStaleSweep = Date.now();
+  if (Date.now()-(staleSweeps.get(env.DB)||0) < 120000) return;   // 큐 메시지마다가 아니라 isolate 당 2분에 1회만 점검
+
   const cutoff = new Date(Date.now()-minutes*60000).toISOString();
   await run(env.DB, `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END, locked_at=NULL, run_after=?, last_error='stale_lock_recovered', updated_at=? WHERE status='running' AND locked_at IS NOT NULL AND locked_at<?`, [nowIso(), nowIso(), cutoff]);
+  staleSweeps.set(env.DB,Date.now());
 }
 
 export async function enqueueMany(env, projectId, type, payloads=[], priority=100) {
@@ -139,25 +140,26 @@ export async function claimJobs(env, limit=4) {
   for (const j of jobs) {
     const needed=j.type==='collect_project'?180:j.type==='generate_report'?100:j.type==='advance_project'?90:60;
     if(env.EXTERNAL_RUNTIME==='github-actions'&&typeof env.DB.remaining==='number'&&env.DB.remaining<needed){env.RUNNER_BUDGET_DEFERRED=true;break;}
-    const r = await run(env.DB, `UPDATE jobs SET status='running', locked_at=?, attempts=attempts+1, updated_at=? WHERE id=? AND status='queued'`, [nowIso(), nowIso(), j.id]);
-    if ((r.meta?.changes || 0) > 0) claimed.push({...j, attempts:(j.attempts||0)+1});
+    const locked=nowIso();
+    const r = await run(env.DB, `UPDATE jobs SET status='running', locked_at=?, attempts=attempts+1, updated_at=? WHERE id=? AND status='queued' AND attempts=? AND run_after<=?`, [locked, locked, j.id,j.attempts||0,locked]);
+    if ((r.meta?.changes || 0) > 0) claimed.push({...j,locked_at:locked, attempts:(j.attempts||0)+1});
   }
   return claimed;
 }
 
 export async function finishJob(env, job, error=null) {
   if (!error) {
-    await run(env.DB, `UPDATE jobs SET status='done', updated_at=?, last_error=NULL WHERE id=?`, [nowIso(), job.id]);
+    await run(env.DB, `UPDATE jobs SET status='done', locked_at=NULL, updated_at=?, last_error=NULL WHERE id=? AND status='running' AND attempts=? AND locked_at=?`, [nowIso(), job.id,job.attempts,job.locked_at]);
     return;
   }
   const max = job.max_attempts || 5;
   const retry = (job.attempts || 1) < max;
   const backoff = Math.min(3600, 30*Math.pow(2, job.attempts || 1));
   const next = new Date(Date.now() + backoff*1000).toISOString();
-  await run(env.DB, `UPDATE jobs SET status=?, run_after=?, locked_at=NULL, last_error=?, updated_at=? WHERE id=?`,
-    [retry?'queued':'failed', next, String(error).slice(0,2000), nowIso(), job.id]);
+  const result=await run(env.DB, `UPDATE jobs SET status=?, run_after=?, locked_at=NULL, last_error=?, updated_at=? WHERE id=? AND status='running' AND attempts=? AND locked_at=?`,
+    [retry?'queued':'failed', next, String(error).slice(0,2000), nowIso(), job.id,job.attempts,job.locked_at]);
   // 재시도 job 에도 깨우기 메시지를 예약(이전에는 다음 무관한 메시지가 올 때까지 방치될 수 있었다)
-  if (retry) await sendWake(env, [{ job_id:job.id, project_id:job.project_id, type:job.type }], backoff);
+  if (retry && result.meta?.changes) await sendWake(env, [{ job_id:job.id, project_id:job.project_id, type:job.type }], backoff);
 }
 
 // 끝난 job 행은 더 이상 쓰이지 않지만 jobs 테이블을 계속 키워 모든 jobs 스캔/집계의 비용을 올린다.

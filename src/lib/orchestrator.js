@@ -281,21 +281,21 @@ async function execute(env,job){
 
 export async function processJobs(env){
   if(env.COMPUTE_EXECUTOR==='github-actions'&&env.EXTERNAL_RUNTIME!=='github-actions')return [{status:'waiting_for_github_actions'}];
-  const jobs=await claimJobs(env,Number(env.MAX_JOBS_PER_TICK||4)); const results=[];
+  const jobs=await claimJobs(env,1); const results=[];
   for(const job of jobs){ env.RUNNER_JOB_OBSERVER?.(job.type,'job_started');try{ const out=await execute(env,job); await finishJob(env,job);env.RUNNER_JOB_OBSERVER?.(job.type,'job_completed'); results.push({id:job.id,type:job.type,ok:true,out}); } catch(e){
     if(e.code==='D1_RATE_LIMITED'&&env.DB.withControl){
       // Rate limiting is transient. Never call finishJob (which spends failure attempts).
       // Try to return the claimed job to the queue using the cleanup reserve. If D1 is
       // still throttled, leave it running for the existing stale-lock recovery mechanism.
       try{
-        await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_d1_rate_limit' WHERE id=? AND status='running'`,[new Date(Date.now()+120000).toISOString(),new Date().toISOString(),job.id]));
+        await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_d1_rate_limit' WHERE id=? AND status='running' AND attempts=? AND locked_at=?`,[new Date(Date.now()+120000).toISOString(),new Date().toISOString(),job.id,job.attempts,job.locked_at]));
       }catch(requeueError){env.RUNNER_JOB_OBSERVER?.(job.type,'rate_limit_requeue_pending',requeueError);}
       env.RUNNER_RATE_LIMIT_DEFERRED=true;
       env.RUNNER_JOB_OBSERVER?.(job.type,'job_rate_limit_deferred',e);
       results.push({id:job.id,type:job.type,ok:null,deferred:true,reason:'d1_rate_limited'});
       break;
     }
-    if(e.message==='runner_api_budget_exhausted'&&env.DB.withControl){await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_api_budget' WHERE id=?`,[new Date().toISOString(),new Date().toISOString(),job.id]));results.push({id:job.id,type:job.type,ok:null,deferred:true});break;}
+    if(e.message==='runner_api_budget_exhausted'&&env.DB.withControl){await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_api_budget' WHERE id=? AND status='running' AND attempts=? AND locked_at=?`,[new Date().toISOString(),new Date().toISOString(),job.id,job.attempts,job.locked_at]));results.push({id:job.id,type:job.type,ok:null,deferred:true});break;}
     if(['protocol_runtime_upgrade_required','protocol_integrity_failure','protocol_drift_after_simulation_start'].includes(e.message)){
       env.RUNNER_JOB_OBSERVER?.(job.type,'job_protocol_recovery',e);
       const recovery=await recoverProtocolCycle(env,job.project_id,e.message);

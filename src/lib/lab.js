@@ -9,13 +9,14 @@ import {earlyManuscriptStatements} from './lab_manuscript_seed.js';
 
 const MAX_ATTEMPTS=3,LEASE_MS=240000;
 // The manuscript deadline is a stop date, not a quota that spreads out research work.
-// One role per tick and a 15-minute minimum interval prevent aggressive quota consumption.
+// One role per tick and a configurable minimum interval prevent aggressive quota consumption.
 export const LAB_ACTIVE_CADENCE_MS=15*60*1000;
+export const labCadence=env=>{const n=Number(env.LAB_CADENCE_SECONDS);return Number.isFinite(n)&&n>=60&&n<=900?n*1000:LAB_ACTIVE_CADENCE_MS;};
 const safeConfig=campaign=>safeJson(campaign.config_json);
-export const nextTime=(c,cursor,now=Date.now())=>{
+export const nextTime=(c,cursor,now=Date.now(),cadence=LAB_ACTIVE_CADENCE_MS)=>{
  // Never slow daily work merely because the final deadline has been extended.
  // Existing executions may have a future next_run_at after an older extension.
- const due=Math.min(now+LAB_ACTIVE_CADENCE_MS,Date.parse(c.deadline_at)-900000);
+ const due=Math.min(now+cadence,Date.parse(c.deadline_at)-900000);
  return new Date(Math.max(now,due)).toISOString();
 };
 async function writeBatches(db,statements){for(let i=0;i<statements.length;i+=40)await db.batch(statements.slice(i,i+40));}
@@ -176,7 +177,7 @@ export async function processLabTick(env){
   if(output.section&&output.markdown)putDoc(output.section,output.markdown);
   if(task.role_id==='leader')for(const key of ['cover_letter','title_page','highlights','appendices'])if(typeof output.documents[key]==='string'&&output.documents[key].trim())putDoc(key,output.documents[key].slice(0,18000));
   statements.push(env.DB.prepare(`UPDATE lab_tasks SET status='done',summary=?,output_json=?,completed_at=? WHERE campaign_id=? AND seq=? AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=? AND status='active')`).bind(output.summary,JSON.stringify(output),at,c.id,task.seq,c.id,token),
-   env.DB.prepare(`UPDATE lab_campaigns SET cursor=?,completed_tasks=completed_tasks+1,next_run_at=?,lease_token=NULL,lease_until=NULL,last_error=NULL,error_count=0,updated_at=? WHERE id=? AND lease_token=?`).bind(cursor,nextTime(c,cursor),at,c.id,token));
+   env.DB.prepare(`UPDATE lab_campaigns SET cursor=?,completed_tasks=completed_tasks+1,next_run_at=?,lease_token=NULL,lease_until=NULL,last_error=NULL,error_count=0,updated_at=? WHERE id=? AND lease_token=?`).bind(cursor,nextTime(c,cursor,Date.now(),labCadence(env)),at,c.id,token));
   await env.DB.batch(statements);bust(env,c.project_id,'lab:status');
   return {status:'task_completed',role:task.role_id,day:task.day,seq:task.seq};
  }catch(error){
@@ -213,7 +214,7 @@ async function completeTaskFailure(env,c,t,token,message){
  const cursor=c.cursor+1,now=nowIso();
  await env.DB.batch([
   env.DB.prepare(`UPDATE lab_tasks SET status='failed',error=?,completed_at=? WHERE campaign_id=? AND seq=? AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=?)`).bind(message,now,c.id,t.seq,c.id,token),
-  env.DB.prepare(`UPDATE lab_campaigns SET cursor=?,failed_tasks=failed_tasks+1,next_run_at=?,last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?`).bind(cursor,nextTime(c,cursor),message,now,c.id,token)
+  env.DB.prepare(`UPDATE lab_campaigns SET cursor=?,failed_tasks=failed_tasks+1,next_run_at=?,last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?`).bind(cursor,nextTime(c,cursor,Date.now(),labCadence(env)),message,now,c.id,token)
  ]);
 }
 

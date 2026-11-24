@@ -122,7 +122,7 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
   const threshold=Number(scenario.risk_threshold_override??config.risk_threshold??.68), latentThreshold=Math.log(threshold/(1-threshold));
   const history=[], est={x:0,p:1,var:Math.max(c.sigma*c.sigma,scenario.process_noise**2),predictionVariance:Math.max(c.sigma*c.sigma,scenario.process_noise**2),change:false};
   const confidenceBins=Array.from({length:10},()=>({n:0,sum:0,correct:0}));
-  let state=randn(rng)*.25, reviewN=0, rtSum=0, fp=0,fn=0, decisions=0, totalLoss=0, adjustmentN=0;
+  let state=randn(rng)*.25, reviewN=0, rtSum=0, fp=0,fn=0, decisions=0, totalLoss=0, adjustmentN=0, exposureTotal=0;
   let rollingErrors=0, safeMode=0;
   // delay_mode='queue_v1': 검토가 필요한 결정은 승인지연 d(일, 시나리오 배율 반영) 뒤에야 집행되고, 그 사이에는 직전 집행 결정이 유지된다(hold-last).
   // 'legacy_v0'은 과거 사이클 재현용: d가 손실의 가산항으로만 들어간다.
@@ -152,7 +152,7 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
     let finalStop=aiStop, decisionDelay=Number(config.autonomous_delay_days??.02);
     if(needsReview){
       reviewN++;
-      const hr=reviewerDecision(reviewRng,aiStop,shouldStop,confidence,reviewer,c.delay_d,scenario.delay_multiplier);
+      const hr=reviewerDecision(reviewRng,aiStop,shouldStop,confidence,reviewer,c.delay_d,scenario.delay_multiplier,config.audit_participant_effect===true?participantEffect:0);
       finalStop=hr.finalStop; decisionDelay=hr.delay;
     }
     if(queueMode){
@@ -175,7 +175,7 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
     // FP = 정지 오판(정상지급 차단), FN = 정지 누락(부정지급·유출).
     // 비용은 n=81 위기 패널의 실패/비실패 집단 평균 peak_outflow로 보정한다.
     const {loss,exposure}=stepLoss({finalStop,shouldStop,cFP,cFN,riskExcess,queueMode,decisionDelay,T,multiplier:Number(scenario.loss_multiplier||1),needsReview,reviewCost:Number(lossCal.review_cost??cFP/Math.max(1,T))},weights);
-    totalLoss+=loss; rtSum+=decisionDelay; decisions++;
+    exposureTotal+=exposure; totalLoss+=loss; rtSum+=decisionDelay; decisions++;
     // Recovery: error EWMA(recAlpha)는 설계 파라미터이며, 비용 스케일만 n=81 패널에서 보정한다.
     if((rollingErrors>Number(c.adjust_m)||exposure>Number(c.recovery_w)) && safeMode===0){
       safeMode=Math.max(1,Math.round(2+3*c.recovery_w)); adjustmentN++; totalLoss+=Number(lossCal.adjustment_cost??cFN/Math.max(1,T))*weights.recovery;
@@ -186,7 +186,7 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mu
   const recoveryTime=rtSum/Math.max(1,decisions), burden=reviewN/Math.max(1,decisions), norm=Math.max(EPS,Number(config.empirical?.loss?.normalization??constraints.loss_max??1));
   // 목적함수는 임의 가중치를 제거하고 각 항을 경험적 손실 스케일과 T로 무차원화한다.
   const objective=episodeLoss/norm + burden + recoveryTime/Math.max(1,horizon) + adjustmentN/Math.max(1,horizon);
-  return {episodeLoss,lossExceeded:episodeLoss>constraints.loss_max,fp,fn,decisions,reviewN,recoveryTime,adjustmentN,objective,confidenceBins};
+  return {episodeLoss,exposureMean:exposureTotal/Math.max(1,horizon),lossExceeded:episodeLoss>constraints.loss_max,fp,fn,decisions,reviewN,recoveryTime,adjustmentN,objective,confidenceBins};
 }
 function emptyAgg(){ return {episodes:0,lossExceed:0,fp:0,fn:0,decisions:0,reviewN:0,rtSum:0,rtSq:0,lossSum:0,lossSq:0,objSum:0,objSq:0,adjustments:0,confidenceBins:Array.from({length:10},()=>({n:0,sum:0,correct:0})),scenarios:{},groups:{}}; }
 function addEpisodeStats(a,e,key){

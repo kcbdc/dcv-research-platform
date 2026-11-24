@@ -1,0 +1,8 @@
+import {freezeConfirm,runConfirm} from '../src/lib/research_confirm.js';
+import {runConfirm as baseline} from '../src/lib/research_confirm_baseline_tmp.js';
+import assert from 'node:assert/strict';
+const candidate={sigma:.05,tau:0,alpha:.35,authority_k:2,delay_d:0,recovery_w:.12,adjust_m:.15,estimator:'ema'};
+const spec={grid:[candidate,{...candidate,recovery_w:.2}],constraints:{loss_max:.18,fn_max:.2,fp_max:.2,review_burden_max:.3,loss_exceed_max:.2,recovery_time_max:2},config:{horizon:24,risk_threshold:.62},scenarios:[{key:'smoke',rho:.82,drift:0,shift_time:8,shift_magnitude:.3,process_noise:.2,volatility:1,delay_multiplier:1,loss_multiplier:1,empirical_outflow:.12,digital:.8}],reviewer:{correct_override_rate:.6,unnecessary_override_rate:.2,participant_accept_sd:.5},namespace:'phase-four-test-only',blocks:8,sourceSeeds:[1,2,3],bounds:{loss:10,delay:10},effects:Object.fromEntries(['P1','P2','P3a','P3b','P4'].map(k=>[k,{min:-2,max:2,minimum:0,direction:1}]))};
+const f=await freezeConfirm({...spec,blocks:500,grid:Array.from({length:32},(_,i)=>({...candidate,recovery_w:.1+i*.005})),sourceRuns:[{seed:123456,n:100000}]});
+const a=await baseline(f),b=await runConfirm(f);assert.deepEqual(a,b);
+const times={baseline:[],optimized:[]};for(let i=0;i<5;i++){for(const [name,fn] of (i%2? [['optimized',runConfirm],['baseline',baseline]]:[['baseline',baseline],['optimized',runConfirm]])){const t=performance.now();await fn(f);times[name].push(performance.now()-t);}}console.log(JSON.stringify({times,identical:true,median:Object.fromEntries(Object.entries(times).map(([k,v])=>[k,v.sort((a,b)=>a-b)[2]]))},null,2));

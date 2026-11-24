@@ -1,3 +1,4 @@
+import {researchDashboard} from './research_decision.js';
 import { one, run, audit } from './db.js';
 import { aiJson } from './ai.js';
 import { nowIso, uid } from './util.js';
@@ -267,7 +268,8 @@ export async function generateReport(env, projectId) {
   const used = ai._ai?.ok === true, pick = (k, fb) => used && (Array.isArray(ai[k]) ? ai[k].length : ai[k]) ? ai[k] : fb;
   const merged = { abstract: base.abstract, discussion: base.discussion, limitations: base.limitations, implications: base.implications, next_steps: base.next_steps };
   const note = used ? `Workers AI (${ai._ai.model})` : `규칙 기반 (AI 호출 실패: ${ai._ai?.error || '알 수 없음'})`;
-  const md = buildMarkdown(t, merged, note), id = uid('report');
+  let md = buildMarkdown(t, merged, note); const id = uid('report');
+  try {const d=await researchDashboard(env,projectId);if(d.cycle===Number(t.project.research_cycle)&&d.revision===Number(t.project.evidence_revision)){md+=`\n\n## 독립 연구 판정\n\n시스템: ${d.system} / 후보 근거: ${d.candidate_basis} / 연구 권고: ${d.recommendation}\n\n${d.hypotheses.map(h=>`- ${h.id}: ${h.status}`).join("\n")}\n\n후보 실패는 연구명제 반증을 의미하지 않는다.\n`;}}catch(e){md+=`\n\n독립 연구 판정: 조회 불가 (재검증 필요).\n`;}
   // Re-read only the mutable scope markers after narrative generation; name is already in thesis snapshot.
   const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
   const snapshotCycle=Number(t.project.research_cycle||1),snapshotRevision=Number(t.project.evidence_revision||0);

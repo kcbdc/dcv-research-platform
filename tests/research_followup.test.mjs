@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {matchedSigma,heterogeneity,stoppingRecommendation} from '../src/lib/research_followup.js';
+test('matched sigma holds are not failures',()=>{const r=matchedSigma([{sigma:.1,verdict:'PASS'},{sigma:.2,verdict:'HOLD'},{sigma:.3,verdict:'FAIL'}]);assert.equal(r.unresolved,2);assert.equal(r.decline,0);});
+test('heterogeneity uses paired participants',()=>{const r=heterogeneity([{participant_hash:'a',ai_correct:1,human_accept:1},{participant_hash:'a',ai_correct:0,human_accept:0},{participant_hash:'b',ai_correct:1,human_accept:0}]);assert.equal(r.paired_participants,1);assert.equal(r.mean,1);assert.equal(r.sd,null);});
+test('budget never automatically drops research',()=>{assert.equal(stoppingRecommendation('PASS',{budget_reached:true}),'PIVOT_REVIEW');assert.equal(stoppingRecommendation('UNVERIFIED',{budget_reached:true}),'CONTINUE');});

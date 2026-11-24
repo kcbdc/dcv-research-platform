@@ -1,3 +1,4 @@
+import {heterogeneity} from './research_followup.js';
 import { all, one, run, audit, enqueue } from './db.js';
 import { nowIso, uid, mulberry32, quantile, safeJson } from './util.js';
 import { latestDefinition } from './define.js';
@@ -98,6 +99,7 @@ export async function fitReviewerModel(env,projectId){
   const cluster=clusterBootstrap(rows,B,20261004),disc=cluster?.ci95?.discrimination_delta||null;
   const minDelta=Number(v.human_min_discrimination_delta??.15);gate.discrimination={estimate:metrics(rows).discrimination_delta,ci95:disc,required:`cluster-bootstrap lower bound >= ${minDelta}`,minimum_effect:minDelta,pass:!!disc&&Number(disc.lo)>=minDelta};
   gate.quality={excluded_participants:excludedIds.size,completed_participants:completedIds.size,protocol,pass:true,human_pool:poolStats};
+  gate.heterogeneity=heterogeneity(rows);
   const sampleReady=gate.participants.pass&&gate.correct_trials.pass&&gate.wrong_trials.pass;
   if(!sampleReady||!gate.discrimination.pass){
     const status=sampleReady&&disc&&disc.lo!=null&&Number.isFinite(Number(disc.lo))?'FAIL':'HOLD';

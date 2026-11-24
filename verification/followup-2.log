@@ -1,0 +1,2235 @@
+
+> dcv-research-platform@0.10.13 test
+> node --test tests/*.test.mjs
+
+TAP version 13
+# (node:5056) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: cleanup calls remain available after the work budget is exhausted
+ok 1 - cleanup calls remain available after the work budget is exhausted
+  ---
+  duration_ms: 68.057726
+  type: 'test'
+  ...
+# Subtest: budget-limited scheduling returns a normal deferral and releases the durable runner lease
+ok 2 - budget-limited scheduling returns a normal deferral and releases the durable runner lease
+  ---
+  duration_ms: 52.81844
+  type: 'test'
+  ...
+# Subtest: a collection job is left queued when insufficient API budget remains
+ok 3 - a collection job is left queued when insufficient API budget remains
+  ---
+  duration_ms: 48.002261
+  type: 'test'
+  ...
+# Subtest: FDIC 1200 branch rows use bulk writes and resume the next linked episode
+ok 4 - FDIC 1200 branch rows use bulk writes and resume the next linked episode
+  ---
+  duration_ms: 102.488136
+  type: 'test'
+  ...
+# Subtest: mid-job budget exhaustion requeues the job without spending a failure attempt
+ok 5 - mid-job budget exhaustion requeues the job without spending a failure attempt
+  ---
+  duration_ms: 43.345358
+  type: 'test'
+  ...
+# (node:5057) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: credentials trim whitespace and distinguish missing, invalid and mismatched values safely
+ok 6 - credentials trim whitespace and distinguish missing, invalid and mismatched values safely
+  ---
+  duration_ms: 1.122318
+  type: 'test'
+  ...
+# Subtest: read-only preflight identifies missing migration 0021 before attempting a lease write
+ok 7 - read-only preflight identifies missing migration 0021 before attempting a lease write
+  ---
+  duration_ms: 42.718923
+  type: 'test'
+  ...
+# Subtest: Cloudflare authorization and schema diagnostics do not echo response secrets
+ok 8 - Cloudflare authorization and schema diagnostics do not echo response secrets
+  ---
+  duration_ms: 1.161417
+  type: 'test'
+  ...
+# Subtest: REST reports non-JSON and network failures without response bodies or tokens
+ok 9 - REST reports non-JSON and network failures without response bodies or tokens
+  ---
+  duration_ms: 27.135318
+  type: 'test'
+  ...
+# (node:5059) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D1 REST 429 backs off using Retry-After and recovers without classifying as research failure
+ok 10 - D1 REST 429 backs off using Retry-After and recovers without classifying as research failure
+  ---
+  duration_ms: 28.008829
+  type: 'test'
+  ...
+# Subtest: exhausted 429 retries yield a safe D1_RATE_LIMITED diagnostic
+ok 11 - exhausted 429 retries yield a safe D1_RATE_LIMITED diagnostic
+  ---
+  duration_ms: 1.181366
+  type: 'test'
+  ...
+# Subtest: runner defers a claimed job on D1 429 without marking it failed
+ok 12 - runner defers a claimed job on D1 429 without marking it failed
+  ---
+  duration_ms: 46.578357
+  type: 'test'
+  ...
+# (node:5089) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: public Worker cannot execute research jobs or lab tasks in Actions mode
+ok 13 - public Worker cannot execute research jobs or lab tasks in Actions mode
+  ---
+  duration_ms: 1.829645
+  type: 'test'
+  ...
+# Subtest: D1 REST preserves binary bindings and SQL quoted question marks
+ok 14 - D1 REST preserves binary bindings and SQL quoted question marks
+  ---
+  duration_ms: 0.950955
+  type: 'test'
+  ...
+# Subtest: D1 REST sends one transactional batch and honors a hard call budget
+ok 15 - D1 REST sends one transactional batch and honors a hard call budget
+  ---
+  duration_ms: 18.986463
+  type: 'test'
+  ...
+# Subtest: global lease excludes other runners and stale owners cannot release new leases
+ok 16 - global lease excludes other runners and stale owners cannot release new leases
+  ---
+  duration_ms: 61.790292
+  type: 'test'
+  ...
+# Subtest: interrupted candidate unit resumes stored results without duplicating evidence or follow-ups
+ok 17 - interrupted candidate unit resumes stored results without duplicating evidence or follow-ups
+  ---
+  duration_ms: 64.72893
+  type: 'test'
+  ...
+# Subtest: Actions orchestration works against authenticated REST adapter and durable database
+ok 18 - Actions orchestration works against authenticated REST adapter and durable database
+  ---
+  duration_ms: 90.055219
+  type: 'test'
+  ...
+# (node:5095) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: BOJO pagination preserves sector rows and encodes encoded secrets only once
+ok 19 - BOJO pagination preserves sector rows and encodes encoded secrets only once
+  ---
+  duration_ms: 64.071232
+  type: 'test'
+  ...
+# Subtest: BOJO API error is not stored as a numeric observation
+ok 20 - BOJO API error is not stored as a numeric observation
+  ---
+  duration_ms: 58.093142
+  type: 'test'
+  ...
+# Subtest: full module registers core and bootstrap when optional search is absent
+ok 21 - full module registers core and bootstrap when optional search is absent
+  ---
+  duration_ms: 8.478672
+  type: 'test'
+  ...
+# Subtest: clearly safe evidence becomes FEASIBLE
+ok 22 - clearly safe evidence becomes FEASIBLE
+  ---
+  duration_ms: 1.760682
+  type: 'test'
+  ...
+# Subtest: clear false-negative violation becomes INFEASIBLE
+ok 23 - clear false-negative violation becomes INFEASIBLE
+  ---
+  duration_ms: 0.295647
+  type: 'test'
+  ...
+# Subtest: boundary evidence is not treated as violation
+ok 24 - boundary evidence is not treated as violation
+  ---
+  duration_ms: 0.306814
+  type: 'test'
+  ...
+# Subtest: estimator benchmark includes four families
+ok 25 - estimator benchmark includes four families
+  ---
+  duration_ms: 0.80555
+  type: 'test'
+  ...
+# (node:5128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: all 208 stranded candidates are recovered and produce actual simulation metrics
+ok 26 - all 208 stranded candidates are recovered and produce actual simulation metrics
+  ---
+  duration_ms: 846.100123
+  type: 'test'
+  ...
+# Subtest: collector that exceeds remaining budget cannot block candidate calculation
+ok 27 - collector that exceeds remaining budget cannot block candidate calculation
+  ---
+  duration_ms: 48.444185
+  type: 'test'
+  ...
+# (node:5144) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: enqueueOnce coalesces queued duplicates (advance_project storm)
+ok 28 - enqueueOnce coalesces queued duplicates (advance_project storm)
+  ---
+  duration_ms: 61.644165
+  type: 'test'
+  ...
+# Subtest: enqueue records the phase column used by the jobs index
+ok 29 - enqueue records the phase column used by the jobs index
+  ---
+  duration_ms: 57.627028
+  type: 'test'
+  ...
+# Subtest: finished projects cost zero reads: advance returns early and cron skips them
+ok 30 - finished projects cost zero reads: advance returns early and cron skips them
+  ---
+  duration_ms: 63.18293
+  type: 'test'
+  ...
+# Subtest: reviewer wait does not poll: a HOLD marker with no new observations stops re-queuing fit_reviewer
+ok 31 - reviewer wait does not poll: a HOLD marker with no new observations stops re-queuing fit_reviewer
+  ---
+  duration_ms: 69.04865
+  type: 'test'
+  ...
+# Subtest: claimJobs reads in priority order using idx_jobs_claim (no temp sort over the whole queue)
+ok 32 - claimJobs reads in priority order using idx_jobs_claim (no temp sort over the whole queue)
+  ---
+  duration_ms: 62.151495
+  type: 'test'
+  ...
+# Subtest: hot queries are index lookups, not full table scans (regression guard)
+ok 33 - hot queries are index lookups, not full table scans (regression guard)
+  ---
+  duration_ms: 63.748525
+  type: 'test'
+  ...
+# Subtest: memo is per-DB, expires, and is busted on writes
+ok 34 - memo is per-DB, expires, and is busted on writes
+  ---
+  duration_ms: 0.711312
+  type: 'test'
+  ...
+# Subtest: queue message is delayed exactly like run_after (no early wake-up that leaves the job stranded)
+ok 35 - queue message is delayed exactly like run_after (no early wake-up that leaves the job stranded)
+  ---
+  duration_ms: 64.097091
+  type: 'test'
+  ...
+# Subtest: a failed job that will be retried gets a wake-up message at its backoff time
+ok 36 - a failed job that will be retried gets a wake-up message at its backoff time
+  ---
+  duration_ms: 74.168308
+  type: 'test'
+  ...
+# Subtest: cron wakes stranded due jobs (queued, due, but no message) and leaves not-yet-due jobs alone
+ok 37 - cron wakes stranded due jobs (queued, due, but no message) and leaves not-yet-due jobs alone
+  ---
+  duration_ms: 51.743691
+  type: 'test'
+  ...
+# Subtest: buildThesisData scans simulation_runs and reviewer_observations once each (no duplicate aggregates)
+ok 38 - buildThesisData scans simulation_runs and reviewer_observations once each (no duplicate aggregates)
+  ---
+  duration_ms: 146.657712
+  type: 'test'
+  ...
+# Subtest: reviewer observation counter: POST increments it atomically and project detail reads it without a COUNT scan
+ok 39 - reviewer observation counter: POST increments it atomically and project detail reads it without a COUNT scan
+  ---
+  duration_ms: 113.840687
+  type: 'test'
+  ...
+# Subtest: seeded candidates update projects.candidate_count in the same batch
+ok 40 - seeded candidates update projects.candidate_count in the same batch
+  ---
+  duration_ms: 56.38393
+  type: 'test'
+  ...
+# (node:5150) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: buildDocx: python-docx가 열 수 있는 유효한 .docx (표·그림·제목·목록·캡션)
+ok 41 - buildDocx: python-docx가 열 수 있는 유효한 .docx (표·그림·제목·목록·캡션)
+  ---
+  duration_ms: 1207.185354
+  type: 'test'
+  ...
+# Subtest: buildDocx: 실제 생성 보고서의 표·그림 개수가 Markdown과 일치
+ok 42 - buildDocx: 실제 생성 보고서의 표·그림 개수가 Markdown과 일치
+  ---
+  duration_ms: 1844.772299
+  type: 'test'
+  ...
+# Subtest: paper anchor matches current n=81 manuscript profile
+ok 43 - paper anchor matches current n=81 manuscript profile
+  ---
+  duration_ms: 0.747946
+  type: 'test'
+  ...
+# Subtest: local OLS refit recovers known reduced-form coefficients
+ok 44 - local OLS refit recovers known reduced-form coefficients
+  ---
+  duration_ms: 1.905386
+  type: 'test'
+  ...
+# Subtest: n=81 panel derives empirical FP/FN loss proxies without fabricated labels
+ok 45 - n=81 panel derives empirical FP/FN loss proxies without fabricated labels
+  ---
+  duration_ms: 0.847042
+  type: 'test'
+  ...
+# (node:5187) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: impact classifier starts human trial at Validate and external data at Measure
+ok 46 - impact classifier starts human trial at Validate and external data at Measure
+  ---
+  duration_ms: 0.741526
+  type: 'test'
+  ...
+# Subtest: one new human trial invalidates prior approval but does not restart compute cycle
+ok 47 - one new human trial invalidates prior approval but does not restart compute cycle
+  ---
+  duration_ms: 48.341413
+  type: 'test'
+  ...
+# Subtest: new external data after computation opens a new research cycle from Measure
+ok 48 - new external data after computation opens a new research cycle from Measure
+  ---
+  duration_ms: 43.242956
+  type: 'test'
+  ...
+# Subtest: approval gates count only current evidence revision
+ok 49 - approval gates count only current evidence revision
+  ---
+  duration_ms: 46.54734
+  type: 'test'
+  ...
+# Subtest: later evidence cannot skip an already pending earlier revalidation stage
+ok 50 - later evidence cannot skip an already pending earlier revalidation stage
+  ---
+  duration_ms: 61.110126
+  type: 'test'
+  ...
+# (node:5194) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: crc32 matches the standard check value
+ok 51 - crc32 matches the standard check value
+  ---
+  duration_ms: 0.802056
+  type: 'test'
+  ...
+# Subtest: zipStore output is a valid archive with UTF-8 names and intact content
+ok 52 - zipStore output is a valid archive with UTF-8 names and intact content
+  ---
+  duration_ms: 989.726962
+  type: 'test'
+  ...
+# Subtest: mdToHtml renders headings, tables, lists, figures and escapes HTML
+ok 53 - mdToHtml renders headings, tables, lists, figures and escapes HTML
+  ---
+  duration_ms: 2.826938
+  type: 'test'
+  ...
+# Subtest: generated report converts to HTML without leftover markdown table syntax
+ok 54 - generated report converts to HTML without leftover markdown table syntax
+  ---
+  duration_ms: 181.110507
+  type: 'test'
+  ...
+# (node:5211) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: FDIC name normalisation removes legal/noise tokens without inventing a match
+ok 55 - FDIC name normalisation removes legal/noise tokens without inventing a match
+  ---
+  duration_ms: 3.001387
+  type: 'test'
+  ...
+# Subtest: SOD HHI is computed from institution deposit shares
+ok 56 - SOD HHI is computed from institution deposit shares
+  ---
+  duration_ms: 0.29711
+  type: 'test'
+  ...
+# Subtest: Financials summary derives deposit change from ordered report dates
+ok 57 - Financials summary derives deposit change from ordered report dates
+  ---
+  duration_ms: 10.077565
+  type: 'test'
+  ...
+# Subtest: FDIC presets use dedicated connectors rather than generic unfiltered JSON ingestion
+ok 58 - FDIC presets use dedicated connectors rather than generic unfiltered JSON ingestion
+  ---
+  duration_ms: 0.558035
+  type: 'test'
+  ...
+# Subtest: FDIC collector source is change-aware so an unchanged scheduled fetch does not become new evidence
+ok 59 - FDIC collector source is change-aware so an unchanged scheduled fetch does not become new evidence
+  ---
+  duration_ms: 8.508526
+  type: 'test'
+  ...
+# Subtest: FDIC failures resolver confirms only a high-confidence unique bank-name match
+ok 60 - FDIC failures resolver confirms only a high-confidence unique bank-name match
+  ---
+  duration_ms: 85.532926
+  type: 'test'
+  ...
+# Subtest: FDIC Financials connector stores CERT-linked quarterly rows
+ok 61 - FDIC Financials connector stores CERT-linked quarterly rows
+  ---
+  duration_ms: 43.691259
+  type: 'test'
+  ...
+# Subtest: FDIC SOD connector computes a separate state-market HHI without overwriting thesis concentration
+ok 62 - FDIC SOD connector computes a separate state-market HHI without overwriting thesis concentration
+  ---
+  duration_ms: 58.183881
+  type: 'test'
+  ...
+# Subtest: FDIC reverification ranking prioritises the largest empirical discrepancy and never overwrites panel values
+ok 63 - FDIC reverification ranking prioritises the largest empirical discrepancy and never overwrites panel values
+  ---
+  duration_ms: 44.999022
+  type: 'test'
+  ...
+# Subtest: FDIC reverification ranking marks linked episodes without comparable dimensions as INSUFFICIENT
+ok 64 - FDIC reverification ranking marks linked episodes without comparable dimensions as INSUFFICIENT
+  ---
+  duration_ms: 56.516455
+  type: 'test'
+  ...
+# Subtest: Episode Reverification Workbench exposes panel values, FDIC raw evidence and suggested causes without overwriting panel
+ok 65 - Episode Reverification Workbench exposes panel values, FDIC raw evidence and suggested causes without overwriting panel
+  ---
+  duration_ms: 69.634777
+  type: 'test'
+  ...
+# Subtest: Workbench RESOLVED requires every checklist item and a reviewer note, then requests evidence registration
+ok 66 - Workbench RESOLVED requires every checklist item and a reviewer note, then requests evidence registration
+  ---
+  duration_ms: 43.169689
+  type: 'test'
+  ...
+# (node:5236) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: robust historical and stress tasks overtake queued exploration in GitHub hybrid
+ok 67 - robust historical and stress tasks overtake queued exploration in GitHub hybrid
+  ---
+  duration_ms: 68.630146
+  type: 'test'
+  ...
+# Subtest: legacy single-executor scheduling retains its existing priority contract
+ok 68 - legacy single-executor scheduling retains its existing priority contract
+  ---
+  duration_ms: 57.865831
+  type: 'test'
+  ...
+# Subtest: aged exploration receives service before fresh robust work
+ok 69 - aged exploration receives service before fresh robust work
+  ---
+  duration_ms: 58.282266
+  type: 'test'
+  ...
+# Subtest: funnel exposes distinct states instead of a single gray N/A class
+ok 70 - funnel exposes distinct states instead of a single gray N/A class
+  ---
+  duration_ms: 0.916264
+  type: 'test'
+  ...
+# Subtest: screenshot scenario: BIS wipes the pool -> ECB/Human become blocked, BIS becomes zero (not permanent gray)
+ok 71 - screenshot scenario: BIS wipes the pool -> ECB/Human become blocked, BIS becomes zero (not permanent gray)
+  ---
+  duration_ms: 0.240045
+  type: 'test'
+  ...
+# Subtest: ECB turns amber then blue as results arrive; Human stays gray until recompute data exists
+ok 72 - ECB turns amber then blue as results arrive; Human stays gray until recompute data exists
+  ---
+  duration_ms: 0.194468
+  type: 'test'
+  ...
+# (node:5263) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Human is HOLD (not NA) for a Synthetic-passing candidate with no human verdict, with a reason
+ok 73 - Human is HOLD (not NA) for a Synthetic-passing candidate with no human verdict, with a reason
+  ---
+  duration_ms: 56.480493
+  type: 'test'
+  ...
+# Subtest: Human stays NA when the candidate never passed Synthetic confirmation
+ok 74 - Human stays NA when the candidate never passed Synthetic confirmation
+  ---
+  duration_ms: 40.421716
+  type: 'test'
+  ...
+# Subtest: human_screen verdicts map to PASS/HOLD/FAIL and human_recompute takes precedence
+ok 75 - human_screen verdicts map to PASS/HOLD/FAIL and human_recompute takes precedence
+  ---
+  duration_ms: 44.503219
+  type: 'test'
+  ...
+# Subtest: Matrix rows cached by an older rule set are rebuilt once (Human N/A -> HOLD)
+ok 76 - Matrix rows cached by an older rule set are rebuilt once (Human N/A -> HOLD)
+  ---
+  duration_ms: 37.168601
+  type: 'test'
+  ...
+# Subtest: non-inferiority is not ignored by group statuses
+ok 77 - non-inferiority is not ignored by group statuses
+  ---
+  duration_ms: 41.543114
+  type: 'test'
+  ...
+# Subtest: recompute covers every confirmed_feasible candidate; only robust-confirmed ones get human_recompute
+ok 78 - recompute covers every confirmed_feasible candidate; only robust-confirmed ones get human_recompute
+  ---
+  duration_ms: 45.855483
+  type: 'test'
+  ...
+# (node:5274) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: participant identity is scoped by project and human protocol, not research cycle
+ok 79 - participant identity is scoped by project and human protocol, not research cycle
+  ---
+  duration_ms: 1.444826
+  type: 'test'
+  ...
+# Subtest: partial main_v2 sessions are preserved cumulatively but are not promoted to eligible participants
+ok 80 - partial main_v2 sessions are preserved cumulatively but are not promoted to eligible participants
+  ---
+  duration_ms: 118.608594
+  type: 'test'
+  ...
+# Subtest: research-cycle changes do not relabel incomplete participants as completed evidence
+ok 81 - research-cycle changes do not relabel incomplete participants as completed evidence
+  ---
+  duration_ms: 63.069308
+  type: 'test'
+  ...
+# Subtest: 10-agent lab snapshot does not count incomplete QC sessions toward the participant gate
+ok 82 - 10-agent lab snapshot does not count incomplete QC sessions toward the participant gate
+  ---
+  duration_ms: 53.926348
+  type: 'test'
+  ...
+# Subtest: paper checklist distinguishes current-protocol participants from publication-eligible completed participants
+ok 83 - paper checklist distinguishes current-protocol participants from publication-eligible completed participants
+  ---
+  duration_ms: 53.087532
+  type: 'test'
+  ...
+# {"reference_ms":82.864604,"optimized_ms":30.18668199999999,"speedup":2.7450716180069086}
+# Subtest: grouped bootstrap matches trial resampling exactly
+ok 84 - grouped bootstrap matches trial resampling exactly
+  ---
+  duration_ms: 27.279905
+  type: 'test'
+  ...
+# Subtest: missing interval cannot become PASS
+ok 85 - missing interval cannot become PASS
+  ---
+  duration_ms: 0.413241
+  type: 'test'
+  ...
+# Subtest: bootstrap performance measurement
+ok 86 - bootstrap performance measurement
+  ---
+  duration_ms: 114.656379
+  type: 'test'
+  ...
+# (node:5296) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: hybrid lane classification uses aggressive Worker fast path and shared transitions
+ok 87 - hybrid lane classification uses aggressive Worker fast path and shared transitions
+  ---
+  duration_ms: 1.311779
+  type: 'test'
+  ...
+# Subtest: hybrid Worker claims worker-fast/shared but leaves heavy compute for GitHub
+ok 88 - hybrid Worker claims worker-fast/shared but leaves heavy compute for GitHub
+  ---
+  duration_ms: 63.794571
+  type: 'test'
+  ...
+# Subtest: shared-fast transition can be claimed by GitHub immediately after heavy compute
+ok 89 - shared-fast transition can be claimed by GitHub immediately after heavy compute
+  ---
+  duration_ms: 56.096496
+  type: 'test'
+  ...
+# Subtest: hybrid public Worker cannot run heavy compute or LAB directly
+ok 90 - hybrid public Worker cannot run heavy compute or LAB directly
+  ---
+  duration_ms: 1.362905
+  type: 'test'
+  ...
+# Subtest: hybrid processJobs on Worker leaves heavy compute queued
+ok 91 - hybrid processJobs on Worker leaves heavy compute queued
+  ---
+  duration_ms: 57.769535
+  type: 'test'
+  ...
+# Subtest: GitHub hybrid prioritizes compute_candidate over low-priority-number shared advance jobs
+ok 92 - GitHub hybrid prioritizes compute_candidate over low-priority-number shared advance jobs
+  ---
+  duration_ms: 58.191809
+  type: 'test'
+  ...
+# Subtest: scheduleAll demotes stale queued advance jobs while pending candidates need compute
+ok 93 - scheduleAll demotes stale queued advance jobs while pending candidates need compute
+  ---
+  duration_ms: 59.531589
+  type: 'test'
+  ...
+# Subtest: hybrid heavy enqueue event-dispatches GitHub once and cooldown coalesces bursts
+ok 94 - hybrid heavy enqueue event-dispatches GitHub once and cooldown coalesces bursts
+  ---
+  duration_ms: 92.726247
+  type: 'test'
+  ...
+# Subtest: delayed hybrid heavy enqueue does not dispatch GitHub before it is due
+ok 95 - delayed hybrid heavy enqueue does not dispatch GitHub before it is due
+  ---
+  duration_ms: 60.057856
+  type: 'test'
+  ...
+# Subtest: hybrid worker-fast enqueue does not dispatch GitHub
+ok 96 - hybrid worker-fast enqueue does not dispatch GitHub
+  ---
+  duration_ms: 56.013879
+  type: 'test'
+  ...
+# Subtest: runner status exposes configuration and queue health without exposing token
+ok 97 - runner status exposes configuration and queue health without exposing token
+  ---
+  duration_ms: 50.431236
+  type: 'test'
+  ...
+# Subtest: event-driven hybrid uses a 5-minute recovery fallback for fast progression
+ok 98 - event-driven hybrid uses a 5-minute recovery fallback for fast progression
+  ---
+  duration_ms: 1.240334
+  type: 'test'
+  ...
+# Subtest: Worker scheduled event drains a short fast-path chain
+ok 99 - Worker scheduled event drains a short fast-path chain
+  ---
+  duration_ms: 0.184763
+  type: 'test'
+  ...
+# Subtest: dashboard exposes hybrid executor lanes to make the split observable
+ok 100 - dashboard exposes hybrid executor lanes to make the split observable
+  ---
+  duration_ms: 0.119296
+  type: 'test'
+  ...
+# (node:5318) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 300 scheduled tasks preserve 10 roles and 30 daily cycles without fake credentials
+ok 101 - 300 scheduled tasks preserve 10 roles and 30 daily cycles without fake credentials
+  ---
+  duration_ms: 1.478736
+  type: 'test'
+  ...
+# Subtest: journal eligibility needs verified SCIE/SSCI and Q1/Q2 or AIS in all three years
+ok 102 - journal eligibility needs verified SCIE/SSCI and Q1/Q2 or AIS in all three years
+  ---
+  duration_ms: 0.929144
+  type: 'test'
+  ...
+# Subtest: hallucinated DOI and non-English AI output are rejected
+ok 103 - hallucinated DOI and non-English AI output are rejected
+  ---
+  duration_ms: 1.320452
+  type: 'test'
+  ...
+# Subtest: legacy DOI attention task resumes without resetting completed tasks
+ok 104 - legacy DOI attention task resumes without resetting completed tasks
+  ---
+  duration_ms: 75.489248
+  type: 'test'
+  ...
+# Subtest: an active campaign with legacy DOI error and delayed retry is recovered immediately
+ok 105 - an active campaign with legacy DOI error and delayed retry is recovered immediately
+  ---
+  duration_ms: 63.697362
+  type: 'test'
+  ...
+# Subtest: live leases are not overwritten by DOI error recovery
+ok 106 - live leases are not overwritten by DOI error recovery
+  ---
+  duration_ms: 50.797488
+  type: 'test'
+  ...
+# Subtest: deadline display uses campaign deadline and never hard-codes October 30
+ok 107 - deadline display uses campaign deadline and never hard-codes October 30
+  ---
+  duration_ms: 1.261605
+  type: 'test'
+  ...
+# Subtest: campaign start is idempotent and only materializes one task
+ok 108 - campaign start is idempotent and only materializes one task
+  ---
+  duration_ms: 50.711751
+  type: 'test'
+  ...
+# Subtest: snapshot reuse does one indexed project read and no candidate/episode scan
+ok 109 - snapshot reuse does one indexed project read and no candidate/episode scan
+  ---
+  duration_ms: 48.709202
+  type: 'test'
+  ...
+# Subtest: only one role runs per tick; another tick before due time is idle
+ok 110 - only one role runs per tick; another tick before due time is idle
+  ---
+  duration_ms: 57.986084
+  type: 'test'
+  ...
+# Subtest: concurrent cron deliveries cannot run the same role twice
+ok 111 - concurrent cron deliveries cannot run the same role twice
+  ---
+  duration_ms: 70.698605
+  type: 'test'
+  ...
+# Subtest: writer and leader persist editable sections and submission documents
+ok 112 - writer and leader persist editable sections and submission documents
+  ---
+  duration_ms: 74.532638
+  type: 'test'
+  ...
+# Subtest: failed AI calls use bounded retries and never persist a fabricated draft
+ok 113 - failed AI calls use bounded retries and never persist a fabricated draft
+  ---
+  duration_ms: 63.401739
+  type: 'test'
+  ...
+# Subtest: deadline persists a six-document package with honest blockers and chunked download
+ok 114 - deadline persists a six-document package with honest blockers and chunked download
+  ---
+  duration_ms: 221.70026
+  type: 'test'
+  ...
+# Subtest: pause revokes lease and status cache avoids repeated role queries
+ok 115 - pause revokes lease and status cache avoids repeated role queries
+  ---
+  duration_ms: 67.645714
+  type: 'test'
+  ...
+# Subtest: single-flight memo coalesces concurrent reads and failed loads are not cached
+ok 116 - single-flight memo coalesces concurrent reads and failed loads are not cached
+  ---
+  duration_ms: 21.523957
+  type: 'test'
+  ...
+# Subtest: unchanged scheduled data is deduplicated without per-row D1 read queries
+ok 117 - unchanged scheduled data is deduplicated without per-row D1 read queries
+  ---
+  duration_ms: 67.022738
+  type: 'test'
+  ...
+# Subtest: semantic evidence digest survives timestamp-only updates
+ok 118 - semantic evidence digest survives timestamp-only updates
+  ---
+  duration_ms: 52.955954
+  type: 'test'
+  ...
+# Subtest: deadline finalization runs within the final cron interval
+ok 119 - deadline finalization runs within the final cron interval
+  ---
+  duration_ms: 167.014793
+  type: 'test'
+  ...
+# Subtest: a lease revoked during package assembly cannot persist orphan chunks
+ok 120 - a lease revoked during package assembly cannot persist orphan chunks
+  ---
+  duration_ms: 227.247746
+  type: 'test'
+  ...
+# Subtest: status ETag returns 304 without reloading task history
+ok 121 - status ETag returns 304 without reloading task history
+  ---
+  duration_ms: 46.805036
+  type: 'test'
+  ...
+# (node:5334) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: new campaigns default to January 30 2027 (KST end of day)
+ok 122 - new campaigns default to January 30 2027 (KST end of day)
+  ---
+  duration_ms: 69.745176
+  type: 'test'
+  ...
+# Subtest: extending an existing deadline preserves work, original start time, and wakes immediately
+ok 123 - extending an existing deadline preserves work, original start time, and wakes immediately
+  ---
+  duration_ms: 50.03441
+  type: 'test'
+  ...
+# Subtest: extension never steals an active Worker lease
+ok 124 - extension never steals an active Worker lease
+  ---
+  duration_ms: 45.048765
+  type: 'test'
+  ...
+# Subtest: next work follows a 15-minute ceiling rather than being spread over deadline
+ok 125 - next work follows a 15-minute ceiling rather than being spread over deadline
+  ---
+  duration_ms: 0.190923
+  type: 'test'
+  ...
+# Subtest: early finalization rejects incomplete evidence without changing cursor or activity
+ok 126 - early finalization rejects incomplete evidence without changing cursor or activity
+  ---
+  duration_ms: 88.478478
+  type: 'test'
+  ...
+# (node:5350) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: DAY 3 seeds seven real prose sections without claiming fabricated results
+ok 127 - DAY 3 seeds seven real prose sections without claiming fabricated results
+  ---
+  duration_ms: 76.286005
+  type: 'test'
+  ...
+# Subtest: early prose is nonnumerical where results are unavailable and DOI validation keeps unsupported citations out
+ok 128 - early prose is nonnumerical where results are unavailable and DOI validation keeps unsupported citations out
+  ---
+  duration_ms: 1.204541
+  type: 'test'
+  ...
+# (node:5361) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: mathtext: 그리스 문자·첨자·분수·연산자
+ok 129 - mathtext: 그리스 문자·첨자·분수·연산자
+  ---
+  duration_ms: 1.348633
+  type: 'test'
+  ...
+# Subtest: mdToHtml: $$ 수식은 번호 붙은 블록, $..$ 는 인라인, 본문은 이스케이프
+ok 130 - mdToHtml: $$ 수식은 번호 붙은 블록, $..$ 는 인라인, 본문은 이스케이프
+  ---
+  duration_ms: 0.856035
+  type: 'test'
+  ...
+# Subtest: buildDocx: 수식 별행 문단과 첨자 런
+ok 131 - buildDocx: 수식 별행 문단과 첨자 런
+  ---
+  duration_ms: 3.167613
+  type: 'test'
+  ...
+# Subtest: 연구모형 절: 연구대상·연구모형·연구질문·산식·그림이 모두 포함되고 수식 번호가 연속
+ok 132 - 연구모형 절: 연구대상·연구모형·연구질문·산식·그림이 모두 포함되고 수식 번호가 연속
+  ---
+  duration_ms: 197.093611
+  type: 'test'
+  ...
+# Subtest: 보고서: 연구모형 절이 본문 1절로 들어가고 빈 프로젝트에서도 깨지지 않음
+ok 133 - 보고서: 연구모형 절이 본문 1절로 들어가고 빈 프로젝트에서도 깨지지 않음
+  ---
+  duration_ms: 164.058219
+  type: 'test'
+  ...
+# Subtest: 이전 버전으로 저장된 보고서는 열 때 연구모형 절이 자동 추가됨
+ok 134 - 이전 버전으로 저장된 보고서는 열 때 연구모형 절이 자동 추가됨
+  ---
+  duration_ms: 111.136911
+  type: 'test'
+  ...
+# (node:5372) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: NA recovery enqueues historical/stress for confirmed candidates on a new evidence revision
+ok 135 - NA recovery enqueues historical/stress for confirmed candidates on a new evidence revision
+  ---
+  duration_ms: 61.440921
+  type: 'test'
+  ...
+# Subtest: cron resumes an archived complete project when current revision robust gates are missing
+ok 136 - cron resumes an archived complete project when current revision robust gates are missing
+  ---
+  duration_ms: 58.755322
+  type: 'test'
+  ...
+# Subtest: old-revision queued jobs do not suppress current-revision robust gates
+ok 137 - old-revision queued jobs do not suppress current-revision robust gates
+  ---
+  duration_ms: 51.473818
+  type: 'test'
+  ...
+# Subtest: in-flight exploration does not block scheduling confirmed candidates robust gates
+ok 138 - in-flight exploration does not block scheduling confirmed candidates robust gates
+  ---
+  duration_ms: 60.395545
+  type: 'test'
+  ...
+# (node:5383) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: openfiscal: 522 retains verified coverage, records failure, then recovers
+ok 139 - openfiscal: 522 retains verified coverage, records failure, then recovers
+  ---
+  duration_ms: 3110.553469
+  type: 'test'
+  ...
+# Subtest: bojo_openapi: 522 retains verified coverage, records failure, then recovers
+ok 140 - bojo_openapi: 522 retains verified coverage, records failure, then recovers
+  ---
+  duration_ms: 3095.259657
+  type: 'test'
+  ...
+# (node:5394) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: official-only jobs advance through all enabled sources despite unrelated backlog and missing keys
+ok 141 - official-only jobs advance through all enabled sources despite unrelated backlog and missing keys
+  ---
+  duration_ms: 101.232661
+  type: 'test'
+  ...
+# (node:5405) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Case A connector activation creates separate layer and official sources
+ok 142 - Case A connector activation creates separate layer and official sources
+  ---
+  duration_ms: 47.655163
+  type: 'test'
+  ...
+# Subtest: BIS CPMI SDMX CSV collector normalizes official observations and is change-aware
+ok 143 - BIS CPMI SDMX CSV collector normalizes official observations and is change-aware
+  ---
+  duration_ms: 66.907813
+  type: 'test'
+  ...
+# Subtest: ECB SUP connector imports LCR/CET1 SDMX CSV
+ok 144 - ECB SUP connector imports LCR/CET1 SDMX CSV
+  ---
+  duration_ms: 42.205037
+  type: 'test'
+  ...
+# Subtest: ECOS connector uses secret and StatisticSearch row normalization
+ok 145 - ECOS connector uses secret and StatisticSearch row normalization
+  ---
+  duration_ms: 43.079489
+  type: 'test'
+  ...
+# Subtest: Case B dedicated OpenFiscal connector is READY by default and remains isolated from BOJO
+ok 146 - Case B dedicated OpenFiscal connector is READY by default and remains isolated from BOJO
+  ---
+  duration_ms: 40.604451
+  type: 'test'
+  ...
+# Subtest: OpenFiscal OPFI156 XML parser and collector preserve fiscal dimensions
+ok 147 - OpenFiscal OPFI156 XML parser and collector preserve fiscal dimensions
+  ---
+  duration_ms: 40.895822
+  type: 'test'
+  ...
+# Subtest: ECOS dedicated default resolves latest monthly END_TIME using StatisticItemList
+ok 148 - ECOS dedicated default resolves latest monthly END_TIME using StatisticItemList
+  ---
+  duration_ms: 39.040268
+  type: 'test'
+  ...
+# Subtest: connector registry covers requested sequence
+ok 149 - connector registry covers requested sequence
+  ---
+  duration_ms: 0.131234
+  type: 'test'
+  ...
+# Subtest: BIS mapping produces D proxy components and sensitivity variants without replacing panel D
+ok 150 - BIS mapping produces D proxy components and sensitivity variants without replacing panel D
+  ---
+  duration_ms: 7.817927
+  type: 'test'
+  ...
+# Subtest: ECB resilience mapping uses Basel LCR/CET1 headroom and maps only into declared theta range
+ok 151 - ECB resilience mapping uses Basel LCR/CET1 headroom and maps only into declared theta range
+  ---
+  duration_ms: 0.497776
+  type: 'test'
+  ...
+# Subtest: official mappings become explicit CDRS stress scenarios rather than silently overwriting baseline parameters
+ok 152 - official mappings become explicit CDRS stress scenarios rather than silently overwriting baseline parameters
+  ---
+  duration_ms: 38.211434
+  type: 'test'
+  ...
+# Subtest: official observation upsert has O(1) read queries, not one SELECT per incoming row
+ok 153 - official observation upsert has O(1) read queries, not one SELECT per incoming row
+  ---
+  duration_ms: 49.199136
+  type: 'test'
+  ...
+# Subtest: connector test route helper never throws and explains ECOS failures
+ok 154 - connector test route helper never throws and explains ECOS failures
+  ---
+  duration_ms: 2.798357
+  type: 'test'
+  ...
+# Subtest: ECOS key is trimmed and item list requests 1000 items
+ok 155 - ECOS key is trimmed and item list requests 1000 items
+  ---
+  duration_ms: 0.918378
+  type: 'test'
+  ...
+# (node:5411) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: OpenFiscal retries transient upstream timeouts with extended bounded timeout
+ok 156 - OpenFiscal retries transient upstream timeouts with extended bounded timeout
+  ---
+  duration_ms: 3078.595269
+  type: 'test'
+  ...
+# Subtest: BOJO retries transient HTTP 522 before parsing a successful response
+ok 157 - BOJO retries transient HTTP 522 before parsing a successful response
+  ---
+  duration_ms: 1060.616095
+  type: 'test'
+  ...
+# (node:5427) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: stale job owner cannot complete or retry a replacement claim
+ok 158 - stale job owner cannot complete or retry a replacement claim
+  ---
+  duration_ms: 54.449517
+  type: 'test'
+  ...
+# Subtest: stale recovery is isolated by database
+ok 159 - stale recovery is isolated by database
+  ---
+  duration_ms: 81.051489
+  type: 'test'
+  ...
+# Subtest: configured lab cadence is four times shorter without changing deadline
+ok 160 - configured lab cadence is four times shorter without changing deadline
+  ---
+  duration_ms: 0.280525
+  type: 'test'
+  ...
+# (node:5438) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: premature report cannot stop pending research; recovery freezes protocol and queues once
+ok 161 - premature report cannot stop pending research; recovery freezes protocol and queues once
+  ---
+  duration_ms: 54.171035
+  type: 'test'
+  ...
+# Subtest: unevaluated candidates do not become failures or 100 percent survivors; preview remains running
+ok 162 - unevaluated candidates do not become failures or 100 percent survivors; preview remains running
+  ---
+  duration_ms: 67.885247
+  type: 'test'
+  ...
+# Subtest: Figures 6 and 7 always resolve into readable SVG even before any evidence
+ok 163 - Figures 6 and 7 always resolve into readable SVG even before any evidence
+  ---
+  duration_ms: 5.069584
+  type: 'test'
+  ...
+# Subtest: robust scheduling continues beyond first 60 confirmed candidates
+ok 164 - robust scheduling continues beyond first 60 confirmed candidates
+  ---
+  duration_ms: 53.42357
+  type: 'test'
+  ...
+# (node:5449) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: new research cycles allocate globally unique protocol versions and preserve earlier protocols
+ok 165 - new research cycles allocate globally unique protocol versions and preserve earlier protocols
+  ---
+  duration_ms: 62.700875
+  type: 'test'
+  ...
+# (node:5460) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: supplied 208 rows contain all twelve delay cells per base and sixteen anchors
+ok 166 - supplied 208 rows contain all twelve delay cells per base and sixteen anchors
+  ---
+  duration_ms: 4.041955
+  type: 'test'
+  ...
+# Subtest: missing operational values do not erase declared tau and d levels
+ok 167 - missing operational values do not erase declared tau and d levels
+  ---
+  duration_ms: 490.662791
+  type: 'test'
+  ...
+# Subtest: redesign preserves previous candidates, freezes 208 paired rows and stores noninferiority results
+ok 168 - redesign preserves previous candidates, freezes 208 paired rows and stores noninferiority results
+  ---
+  duration_ms: 244.953713
+  type: 'test'
+  ...
+# Subtest: d contributes to review delay and loss; tau changes loss under identical environmental draws
+ok 169 - d contributes to review delay and loss; tau changes loss under identical environmental draws
+  ---
+  duration_ms: 1.692983
+  type: 'test'
+  ...
+# Subtest: common confidence is independent of estimator-specific p; legacy path reveals the old artifact
+ok 170 - common confidence is independent of estimator-specific p; legacy path reveals the old artifact
+  ---
+  duration_ms: 0.211613
+  type: 'test'
+  ...
+# Subtest: main_v2 schedule has 30 analytic trials, 40% AI errors and balanced confidence without exposing truth
+ok 171 - main_v2 schedule has 30 analytic trials, 40% AI errors and balanced confidence without exposing truth
+  ---
+  duration_ms: 0.688237
+  type: 'test'
+  ...
+# Subtest: server trial cannot be forged or reused; 30 analytic + 3 interleaved attention trials are capped
+ok 172 - server trial cannot be forged or reused; 30 analytic + 3 interleaved attention trials are capped
+  ---
+  duration_ms: 113.529503
+  type: 'test'
+  ...
+# Subtest: report scenario totals come from executed keys and estimator CI includes denominators
+ok 173 - report scenario totals come from executed keys and estimator CI includes denominators
+  ---
+  duration_ms: 63.094926
+  type: 'test'
+  ...
+# Subtest: incomplete scenario evidence cannot produce a zero regret
+ok 174 - incomplete scenario evidence cannot produce a zero regret
+  ---
+  duration_ms: 42.186069
+  type: 'test'
+  ...
+# Subtest: a small human sample receives descriptive cluster bootstrap without being promoted
+ok 175 - a small human sample receives descriptive cluster bootstrap without being promoted
+  ---
+  duration_ms: 39.773913
+  type: 'test'
+  ...
+# (node:5471) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: legacy untagged participants carry forward while explicitly incompatible protocols stay excluded
+ok 176 - legacy untagged participants carry forward while explicitly incompatible protocols stay excluded
+  ---
+  duration_ms: 71.061742
+  type: 'test'
+  ...
+# Subtest: automatic draft report is queued before final approval and coalesced
+ok 177 - automatic draft report is queued before final approval and coalesced
+  ---
+  duration_ms: 40.449583
+  type: 'test'
+  ...
+# Subtest: queued report regeneration keeps prior text and does not claim AI failure
+ok 178 - queued report regeneration keeps prior text and does not claim AI failure
+  ---
+  duration_ms: 7.411105
+  type: 'test'
+  ...
+# Subtest: latest report GET preserves stale snapshots with explicit revision warning
+ok 179 - latest report GET preserves stale snapshots with explicit revision warning
+  ---
+  duration_ms: 98.359875
+  type: 'test'
+  ...
+# Subtest: live official status overwrites stale table only, keeps following sections
+ok 180 - live official status overwrites stale table only, keeps following sections
+  ---
+  duration_ms: 0.888393
+  type: 'test'
+  ...
+# Subtest: cached gateway error preserves measured row count and does not claim fresh success
+ok 181 - cached gateway error preserves measured row count and does not claim fresh success
+  ---
+  duration_ms: 0.158074
+  type: 'test'
+  ...
+# Subtest: legacy verdict strings become honest explanatory labels, not fabricated metrics
+ok 182 - legacy verdict strings become honest explanatory labels, not fabricated metrics
+  ---
+  duration_ms: 0.37159
+  type: 'test'
+  ...
+# Subtest: human pooling is disclosed separately from quality gates
+ok 183 - human pooling is disclosed separately from quality gates
+  ---
+  duration_ms: 0.313293
+  type: 'test'
+  ...
+# Subtest: replaces legacy 9B verdicts with measured values and preserves adjacent sections
+ok 184 - replaces legacy 9B verdicts with measured values and preserves adjacent sections
+  ---
+  duration_ms: 1.541068
+  type: 'test'
+  ...
+# Subtest: partially collected Bojo API does not falsely claim complete
+ok 185 - partially collected Bojo API does not falsely claim complete
+  ---
+  duration_ms: 0.309697
+  type: 'test'
+  ...
+# (node:5504) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: new participant is shown live while previous report keeps its snapshot counts
+ok 186 - new participant is shown live while previous report keeps its snapshot counts
+  ---
+  duration_ms: 87.858321
+  type: 'test'
+  ...
+# Subtest: evidence arriving during report AI generation cannot relabel old counts as new revision
+ok 187 - evidence arriving during report AI generation cannot relabel old counts as new revision
+  ---
+  duration_ms: 57.429531
+  type: 'test'
+  ...
+# Subtest: matrix prints measured values even for genuinely failed gates
+ok 188 - matrix prints measured values even for genuinely failed gates
+  ---
+  duration_ms: 1.18377
+  type: 'test'
+  ...
+# Subtest: matrix never fabricates evidence or promotes missing to passing
+ok 189 - matrix never fabricates evidence or promotes missing to passing
+  ---
+  duration_ms: 0.347113
+  type: 'test'
+  ...
+# Subtest: matrix reports observed data with boundary verdict
+ok 190 - matrix reports observed data with boundary verdict
+  ---
+  duration_ms: 0.203
+  type: 'test'
+  ...
+# Subtest: baseline arithmetic and weighted loss
+ok 191 - baseline arithmetic and weighted loss
+  ---
+  duration_ms: 1.145162
+  type: 'test'
+  ...
+# Subtest: sensitivity uses intervals and never turns missing into pass
+ok 192 - sensitivity uses intervals and never turns missing into pass
+  ---
+  duration_ms: 1.799701
+  type: 'test'
+  ...
+# Subtest: hypothesis and stopping independent of candidate failure
+ok 193 - hypothesis and stopping independent of candidate failure
+  ---
+  duration_ms: 0.213776
+  type: 'test'
+  ...
+# Subtest: matched sigma holds are not failures
+ok 194 - matched sigma holds are not failures
+  ---
+  duration_ms: 1.030814
+  type: 'test'
+  ...
+# Subtest: heterogeneity uses paired participants
+ok 195 - heterogeneity uses paired participants
+  ---
+  duration_ms: 0.257851
+  type: 'test'
+  ...
+# Subtest: budget never automatically drops research
+ok 196 - budget never automatically drops research
+  ---
+  duration_ms: 0.184853
+  type: 'test'
+  ...
+# (node:5548) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: robust simulation IDs are distinct per evidence revision, while frozen exploration identity is stable
+ok 197 - robust simulation IDs are distinct per evidence revision, while frozen exploration identity is stable
+  ---
+  duration_ms: 0.785881
+  type: 'test'
+  ...
+# Subtest: revalidated historical evidence inserts new real data without deleting old revision results
+ok 198 - revalidated historical evidence inserts new real data without deleting old revision results
+  ---
+  duration_ms: 75.038506
+  type: 'test'
+  ...
+# Subtest: robust queue does not schedule a phase whose current revision result exists
+ok 199 - robust queue does not schedule a phase whose current revision result exists
+  ---
+  duration_ms: 46.541888
+  type: 'test'
+  ...
+# Subtest: validation does not confirm a candidate from stale historical/stress runs
+ok 200 - validation does not confirm a candidate from stale historical/stress runs
+  ---
+  duration_ms: 41.67274
+  type: 'test'
+  ...
+# Subtest: confirmatory inference records Bonferroni familywise correction
+ok 201 - confirmatory inference records Bonferroni familywise correction
+  ---
+  duration_ms: 1.171652
+  type: 'test'
+  ...
+# Subtest: loss calibration is explicitly proxy-only with sensitivity bounds
+ok 202 - loss calibration is explicitly proxy-only with sensitivity bounds
+  ---
+  duration_ms: 0.657882
+  type: 'test'
+  ...
+# Subtest: stratified calibration bootstrap propagates reconstructed measurement error
+ok 203 - stratified calibration bootstrap propagates reconstructed measurement error
+  ---
+  duration_ms: 5.016326
+  type: 'test'
+  ...
+# Subtest: historical episode calibration does not silently use inconclusive theta3 digital coefficient
+ok 204 - historical episode calibration does not silently use inconclusive theta3 digital coefficient
+  ---
+  duration_ms: 0.219474
+  type: 'test'
+  ...
+# Subtest: participant-cluster bootstrap treats participants as sampling units
+ok 205 - participant-cluster bootstrap treats participants as sampling units
+  ---
+  duration_ms: 0.803798
+  type: 'test'
+  ...
+# Subtest: cross-case criterion exposes overlap, rank consistency and boundary error
+ok 206 - cross-case criterion exposes overlap, rank consistency and boundary error
+  ---
+  duration_ms: 0.331289
+  type: 'test'
+  ...
+# Subtest: sampleDesign returns max unique deterministic points without full grid
+ok 207 - sampleDesign returns max unique deterministic points without full grid
+  ---
+  duration_ms: 8.99772
+  type: 'test'
+  ...
+# Subtest: sampleDesign enumerates everything when the grid is small
+ok 208 - sampleDesign enumerates everything when the grid is small
+  ---
+  duration_ms: 0.206856
+  type: 'test'
+  ...
+# Subtest: sampleDesign is fast enough for a 10 ms CPU budget
+ok 209 - sampleDesign is fast enough for a 10 ms CPU budget
+  ---
+  duration_ms: 2.94261
+  type: 'test'
+  ...
+# Subtest: recommended official source presets cover empirical, payments and public-payment second-case layers
+ok 210 - recommended official source presets cover empirical, payments and public-payment second-case layers
+  ---
+  duration_ms: 0.688067
+  type: 'test'
+  ...
+# Subtest: migrations never destructively delete/drop projects
+ok 211 - migrations never destructively delete/drop projects
+  ---
+  duration_ms: 2.615736
+  type: 'test'
+  ...
+# Subtest: project list has legacy-schema compatibility and storage lineage guard
+ok 212 - project list has legacy-schema compatibility and storage lineage guard
+  ---
+  duration_ms: 0.590943
+  type: 'test'
+  ...
+# Subtest: ui recovery keeps last known project and renders current research briefing
+ok 213 - ui recovery keeps last known project and renders current research briefing
+  ---
+  duration_ms: 0.637953
+  type: 'test'
+  ...
+# Subtest: panel headings use deterministic title-description rows
+ok 214 - panel headings use deterministic title-description rows
+  ---
+  duration_ms: 0.420161
+  type: 'test'
+  ...
+# (node:5603) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: thesis data aggregates candidates, reviewer and panel
+ok 215 - thesis data aggregates candidates, reviewer and panel
+  ---
+  duration_ms: 98.139399
+  type: 'test'
+  ...
+# Subtest: report contains all thesis sections, tables and figure references
+ok 216 - report contains all thesis sections, tables and figure references
+  ---
+  duration_ms: 77.265873
+  type: 'test'
+  ...
+# Subtest: report on an empty project does not crash or print undefined
+ok 217 - report on an empty project does not crash or print undefined
+  ---
+  duration_ms: 95.376294
+  type: 'test'
+  ...
+# Subtest: every figure is well-formed SVG with sensible size
+ok 218 - every figure is well-formed SVG with sensible size
+  ---
+  duration_ms: 74.33436
+  type: 'test'
+  ...
+# Subtest: csv exports have BOM, header and one row per record
+ok 219 - csv exports have BOM, header and one row per record
+  ---
+  duration_ms: 70.341618
+  type: 'test'
+  ...
+# Subtest: primary dashboard uses exact CSS grids for balanced rows and columns
+ok 220 - primary dashboard uses exact CSS grids for balanced rows and columns
+  ---
+  duration_ms: 1.053076
+  type: 'test'
+  ...
+# Subtest: project auxiliary panels are deferred and cached per cycle/revision
+ok 221 - project auxiliary panels are deferred and cached per cycle/revision
+  ---
+  duration_ms: 0.253194
+  type: 'test'
+  ...
+# Subtest: high-frequency project compute metadata is memoized and status dashboards batch D1 reads
+ok 222 - high-frequency project compute metadata is memoized and status dashboards batch D1 reads
+  ---
+  duration_ms: 0.183711
+  type: 'test'
+  ...
+# Subtest: browser bootstrap runs after auxiliary project wrappers are registered
+ok 223 - browser bootstrap runs after auxiliary project wrappers are registered
+  ---
+  duration_ms: 0.20926
+  type: 'test'
+  ...
+# Subtest: report preview defaults to rendered HTML and explicitly hydrates figures
+ok 224 - report preview defaults to rendered HTML and explicitly hydrates figures
+  ---
+  duration_ms: 1.06178
+  type: 'test'
+  ...
+# Subtest: thesis toolkit resolves DCV core dynamically so module order cannot break clicks
+ok 225 - thesis toolkit resolves DCV core dynamically so module order cannot break clicks
+  ---
+  duration_ms: 0.18915
+  type: 'test'
+  ...
+# Subtest: initial boot retries transient project load failures and analytical heights use right card as reference
+ok 226 - initial boot retries transient project load failures and analytical heights use right card as reference
+  ---
+  duration_ms: 0.318921
+  type: 'test'
+  ...
+# (node:5625) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: pending candidate that already has an exploration run (job died before status UPDATE) is re-queued
+ok 227 - pending candidate that already has an exploration run (job died before status UPDATE) is re-queued
+  ---
+  duration_ms: 52.457753
+  type: 'test'
+  ...
+# Subtest: transient rate-limit failures do not permanently abandon a pending candidate
+ok 228 - transient rate-limit failures do not permanently abandon a pending candidate
+  ---
+  duration_ms: 44.458828
+  type: 'test'
+  ...
+# Subtest: three permanent failures still stop retries
+ok 229 - three permanent failures still stop retries
+  ---
+  duration_ms: 54.725915
+  type: 'test'
+  ...
+# Subtest: pending candidate with a queued job is not duplicated
+ok 230 - pending candidate with a queued job is not duplicated
+  ---
+  duration_ms: 55.062873
+  type: 'test'
+  ...
+# Subtest: drifted pending counter is repaired from the authoritative table when nothing can be queued
+ok 231 - drifted pending counter is repaired from the authoritative table when nothing can be queued
+  ---
+  duration_ms: 46.09385
+  type: 'test'
+  ...
+# Subtest: dashboard separates robust regret from human recompute and explains gate lifecycle
+ok 232 - dashboard separates robust regret from human recompute and explains gate lifecycle
+  ---
+  duration_ms: 0.968532
+  type: 'test'
+  ...
+# Subtest: project detail exposes regret provenance rather than a context-free number
+ok 233 - project detail exposes regret provenance rather than a context-free number
+  ---
+  duration_ms: 0.353913
+  type: 'test'
+  ...
+# Subtest: report states matrix gate timing and that human recompute is outside regret metric
+ok 234 - report states matrix gate timing and that human recompute is outside regret metric
+  ---
+  duration_ms: 0.176872
+  type: 'test'
+  ...
+# (node:5647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: pending practice trial is resumed instead of throwing complete_pending_practice_trial
+ok 235 - pending practice trial is resumed instead of throwing complete_pending_practice_trial
+  ---
+  duration_ms: 49.552297
+  type: 'test'
+  ...
+# Subtest: actions preflight requires project_cycle_stats and workflow applies migrations first
+ok 236 - actions preflight requires project_cycle_stats and workflow applies migrations first
+  ---
+  duration_ms: 1.509652
+  type: 'test'
+  ...
+# Subtest: stale locks are stored as stable code and rendered as recovery notice
+ok 237 - stale locks are stored as stable code and rendered as recovery notice
+  ---
+  duration_ms: 0.619245
+  type: 'test'
+  ...
+# Subtest: migration reconciler recognizes non-idempotent 0004 schema artifacts
+ok 238 - migration reconciler recognizes non-idempotent 0004 schema artifacts
+  ---
+  duration_ms: 1.146024
+  type: 'test'
+  ...
+# Subtest: workflow reconciles legacy ledger before wrangler migration apply
+ok 239 - workflow reconciles legacy ledger before wrangler migration apply
+  ---
+  duration_ms: 0.291491
+  type: 'test'
+  ...
+# Subtest: due official collection is not blocked by pending candidate computation
+ok 240 - due official collection is not blocked by pending candidate computation
+  ---
+  duration_ms: 0.865599
+  type: 'test'
+  ...
+# Subtest: enabling official connectors immediately queues collection
+ok 241 - enabling official connectors immediately queues collection
+  ---
+  duration_ms: 0.180587
+  type: 'test'
+  ...
+# Subtest: live report preflight replaces stale zero participant count with current protocol and publication-ready counts
+ok 242 - live report preflight replaces stale zero participant count with current protocol and publication-ready counts
+  ---
+  duration_ms: 0.87949
+  type: 'test'
+  ...
+# Subtest: report endpoint distinguishes live protocol participants and publication-ready participants and queues refresh at threshold
+ok 243 - report endpoint distinguishes live protocol participants and publication-ready participants and queues refresh at threshold
+  ---
+  duration_ms: 0.581961
+  type: 'test'
+  ...
+# (node:5707) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v0.10.7 normalized human queries avoid context-json scans on the current protocol hot path
+ok 244 - v0.10.7 normalized human queries avoid context-json scans on the current protocol hot path
+  ---
+  duration_ms: 0.914361
+  type: 'test'
+  ...
+# Subtest: human QC uses same-cycle main trials for fast-share and one compact aggregate
+ok 245 - human QC uses same-cycle main trials for fast-share and one compact aggregate
+  ---
+  duration_ms: 0.146287
+  type: 'test'
+  ...
+# Subtest: reviewer wait uses denormalized last-observation marker instead of polling observations
+ok 246 - reviewer wait uses denormalized last-observation marker instead of polling observations
+  ---
+  duration_ms: 0.100489
+  type: 'test'
+  ...
+# Subtest: approval gates are returned correctly from a single compact statement
+ok 247 - approval gates are returned correctly from a single compact statement
+  ---
+  duration_ms: 43.663002
+  type: 'test'
+  ...
+# Subtest: legacy explicit protocol stays distinct while normalized current-cycle report remains buildable
+ok 248 - legacy explicit protocol stays distinct while normalized current-cycle report remains buildable
+  ---
+  duration_ms: 64.691953
+  type: 'test'
+  ...
+# Subtest: humanStats keeps normalized reviewer_trials source and skips publication aggregate on detail polling
+ok 249 - humanStats keeps normalized reviewer_trials source and skips publication aggregate on detail polling
+  ---
+  duration_ms: 0.901162
+  type: 'test'
+  ...
+# Subtest: humanStats exposes eligible_participants alias
+ok 250 - humanStats exposes eligible_participants alias
+  ---
+  duration_ms: 0.106357
+  type: 'test'
+  ...
+# Subtest: report path batches project+definition reads and overlaps stored-report load with live stats
+ok 251 - report path batches project+definition reads and overlaps stored-report load with live stats
+  ---
+  duration_ms: 0.393331
+  type: 'test'
+  ...
+# Subtest: known research cycle avoids redundant project read during human-session verification
+ok 252 - known research cycle avoids redundant project read during human-session verification
+  ---
+  duration_ms: 0.245813
+  type: 'test'
+  ...
+# Subtest: migration covers participant DISTINCT hot path without JSON expression scans
+ok 253 - migration covers participant DISTINCT hot path without JSON expression scans
+  ---
+  duration_ms: 0.186125
+  type: 'test'
+  ...
+# Subtest: project detail coalesces independent reads into D1 batches and overlaps derived gates
+ok 254 - project detail coalesces independent reads into D1 batches and overlaps derived gates
+  ---
+  duration_ms: 0.473711
+  type: 'test'
+  ...
+# Subtest: human observation counters are trigger-owned so response batches do not issue redundant project updates
+ok 255 - human observation counters are trigger-owned so response batches do not issue redundant project updates
+  ---
+  duration_ms: 0.127448
+  type: 'test'
+  ...
+# (node:5729) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 0033 repairs materialized candidate counters and clamps negative drift
+ok 256 - 0033 repairs materialized candidate counters and clamps negative drift
+  ---
+  duration_ms: 1.23805
+  type: 'test'
+  ...
+# Subtest: project_cycle_stats never exposes a negative pending count after candidate updates
+ok 257 - project_cycle_stats never exposes a negative pending count after candidate updates
+  ---
+  duration_ms: 55.528542
+  type: 'test'
+  ...
+# (node:5740) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: legacy duplicate cycle-stat triggers are gone (each counter has exactly one writer)
+ok 258 - legacy duplicate cycle-stat triggers are gone (each counter has exactly one writer)
+  ---
+  duration_ms: 47.08094
+  type: 'test'
+  ...
+# Subtest: candidate and run counters equal the authoritative tables after status changes (no 2x drift)
+ok 259 - candidate and run counters equal the authoritative tables after status changes (no 2x drift)
+  ---
+  duration_ms: 43.800746
+  type: 'test'
+  ...
+# Subtest: advance leaves the robust stage and queues validate_project even if the cached feasible counter was inflated
+ok 260 - advance leaves the robust stage and queues validate_project even if the cached feasible counter was inflated
+  ---
+  duration_ms: 41.143588
+  type: 'test'
+  ...
+# Subtest: advance still waits in the robust stage (and queues work) when stress runs are genuinely missing
+ok 261 - advance still waits in the robust stage (and queues work) when stress runs are genuinely missing
+  ---
+  duration_ms: 36.953594
+  type: 'test'
+  ...
+# Subtest: reviewer observation counter has one writer: N observations -> reviewer_obs_count == N
+ok 262 - reviewer observation counter has one writer: N observations -> reviewer_obs_count == N
+  ---
+  duration_ms: 35.799178
+  type: 'test'
+  ...
+# (node:5746) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: transient 503 from api.fdic.gov is retried and then succeeds
+ok 263 - transient 503 from api.fdic.gov is retried and then succeeds
+  ---
+  duration_ms: 1573.535725
+  type: 'test'
+  ...
+# Subtest: persistent 503 surfaces a labelled, retryable error (not a bare 503)
+ok 264 - persistent 503 surfaces a labelled, retryable error (not a bare 503)
+  ---
+  duration_ms: 1543.681453
+  type: 'test'
+  ...
+# Subtest: failures request is field-limited to keep payload and CPU small
+ok 265 - failures request is field-limited to keep payload and CPU small
+  ---
+  duration_ms: 42.338213
+  type: 'test'
+  ...
+# Subtest: indexed matching equals brute-force bankNameScore ranking and is fast at scale
+ok 266 - indexed matching equals brute-force bankNameScore ranking and is fast at scale
+  ---
+  duration_ms: 319.504442
+  type: 'test'
+  ...
+# (node:5762) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: official sources are collected on the Worker without a GitHub Actions runner
+ok 267 - official sources are collected on the Worker without a GitHub Actions runner
+  ---
+  duration_ms: 63.94973
+  type: 'test'
+  ...
+# Subtest: a failed source reports the cause and is retried within 30 minutes, not after a full cadence
+ok 268 - a failed source reports the cause and is retried within 30 minutes, not after a full cadence
+  ---
+  duration_ms: 39.763719
+  type: 'test'
+  ...
+# Subtest: non-forced run only touches due sources
+ok 269 - non-forced run only touches due sources
+  ---
+  duration_ms: 40.916523
+  type: 'test'
+  ...
+# Subtest: emergency flag lets the hybrid Worker claim a stranded collect_project; normal mode does not
+ok 270 - emergency flag lets the hybrid Worker claim a stranded collect_project; normal mode does not
+  ---
+  duration_ms: 37.887094
+  type: 'test'
+  ...
+# Subtest: ECB collector retries a timeout once, fetches series in parallel, and labels persistent timeouts
+ok 271 - ECB collector retries a timeout once, fetches series in parallel, and labels persistent timeouts
+  ---
+  duration_ms: 2006.959454
+  type: 'test'
+  ...
+# Subtest: BOJO: data.go.kr APPLICATION_ERROR is retried and then labelled with code + hint
+ok 272 - BOJO: data.go.kr APPLICATION_ERROR is retried and then labelled with code + hint
+  ---
+  duration_ms: 3028.277985
+  type: 'test'
+  ...
+# Subtest: BOJO: recovers when a retry succeeds
+ok 273 - BOJO: recovers when a retry succeeds
+  ---
+  duration_ms: 1004.161111
+  type: 'test'
+  ...
+# Subtest: BOJO: gateway error returned with HTTP 200 (XML) is also explained
+ok 274 - BOJO: gateway error returned with HTTP 200 (XML) is also explained
+  ---
+  duration_ms: 1.857817
+  type: 'test'
+  ...
+# Subtest: explainConnectorError maps data.go.kr codes
+ok 275 - explainConnectorError maps data.go.kr codes
+  ---
+  duration_ms: 0.168559
+  type: 'test'
+  ...
+# (node:5784) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v0.10.12 freeze blocks new research cycle but still accepts human trial evidence
+ok 276 - v0.10.12 freeze blocks new research cycle but still accepts human trial evidence
+  ---
+  duration_ms: 49.771081
+  type: 'test'
+  ...
+# Subtest: v0.10.12 releasing the freeze restores normal cycle behaviour
+ok 277 - v0.10.12 releasing the freeze restores normal cycle behaviour
+  ---
+  duration_ms: 44.044166
+  type: 'test'
+  ...
+# (node:5795) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v0.10.13 auto collectors defer data instead of opening a new research cycle
+ok 278 - v0.10.13 auto collectors defer data instead of opening a new research cycle
+  ---
+  duration_ms: 49.976534
+  type: 'test'
+  ...
+# Subtest: v0.10.13 manual data still opens a cycle, and a not-yet-started project ingests normally
+ok 279 - v0.10.13 manual data still opens a cycle, and a not-yet-started project ingests normally
+  ---
+  duration_ms: 87.757622
+  type: 'test'
+  ...
+# Subtest: v0.10.13 pool keeps completed same-protocol prior participants and drops the rest
+ok 280 - v0.10.13 pool keeps completed same-protocol prior participants and drops the rest
+  ---
+  duration_ms: 1.980558
+  type: 'test'
+  ...
+# Subtest: v0.10.13 pool counts one subject once (current cycle wins, otherwise earliest)
+ok 281 - v0.10.13 pool counts one subject once (current cycle wins, otherwise earliest)
+  ---
+  duration_ms: 0.428344
+  type: 'test'
+  ...
+# Subtest: historical reuse rejects records without verifiable cross-cycle identity
+ok 282 - historical reuse rejects records without verifiable cross-cycle identity
+  ---
+  duration_ms: 0.164002
+  type: 'test'
+  ...
+# Subtest: same participant hash reused in different cycles retains exact selected cycle key
+ok 283 - same participant hash reused in different cycles retains exact selected cycle key
+  ---
+  duration_ms: 0.167908
+  type: 'test'
+  ...
+# (node:5806) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: migrations 0022-0023 install QC/session/lineage and participant-token schema
+ok 284 - migrations 0022-0023 install QC/session/lineage and participant-token schema
+  ---
+  duration_ms: 40.645521
+  type: 'test'
+  ...
+# Subtest: main_v2 schedule fixes 30 trials, 40% AI errors and balances confidence
+ok 285 - main_v2 schedule fixes 30 trials, 40% AI errors and balances confidence
+  ---
+  duration_ms: 0.370548
+  type: 'test'
+  ...
+# Subtest: balanced_factorial_v2 fully crosses estimator x alpha x W within four nuisance blocks
+ok 286 - balanced_factorial_v2 fully crosses estimator x alpha x W within four nuisance blocks
+  ---
+  duration_ms: 0.812912
+  type: 'test'
+  ...
+# Subtest: v2 block design fully confounds sigma/tau/m (documents the defect); v3 removes it
+ok 287 - v2 block design fully confounds sigma/tau/m (documents the defect); v3 removes it
+  ---
+  duration_ms: 583.223714
+  type: 'test'
+  ...
+# Subtest: v3 keeps 48 core cells x4, exact marginal balance and is deterministic per seed
+ok 288 - v3 keeps 48 core cells x4, exact marginal balance and is deterministic per seed
+  ---
+  duration_ms: 1075.501187
+  type: 'test'
+  ...
+# Subtest: legacy_v0 reproduces the old defect: FN/FP are exactly invariant to approval delay d
+ok 289 - legacy_v0 reproduces the old defect: FN/FP are exactly invariant to approval delay d
+  ---
+  duration_ms: 20.724145
+  type: 'test'
+  ...
+# Subtest: queue_v1: approval delay d moves FN, FP and loss monotonically (default reviewer)
+ok 290 - queue_v1: approval delay d moves FN, FP and loss monotonically (default reviewer)
+  ---
+  duration_ms: 53.921608
+  type: 'test'
+  ...
+# Subtest: queue_v1 with d=0 equals legacy decision path (no hidden lag)
+ok 291 - queue_v1 with d=0 equals legacy decision path (no hidden lag)
+  ---
+  duration_ms: 4.077618
+  type: 'test'
+  ...
+# (node:5828) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: admin API fails closed when ADMIN_TOKEN is not configured, while participant quiz stays public
+ok 292 - admin API fails closed when ADMIN_TOKEN is not configured, while participant quiz stays public
+  ---
+  duration_ms: 68.626234
+  type: 'test'
+  ...
+# Subtest: human protocol hash is derived from actual settings and changes when preregistered QC settings change
+ok 293 - human protocol hash is derived from actual settings and changes when preregistered QC settings change
+  ---
+  duration_ms: 37.99852
+  type: 'test'
+  ...
+# Subtest: main task uses noisy cues rather than deterministic amount/limit arithmetic and attention is a separate phase
+ok 294 - main task uses noisy cues rather than deterministic amount/limit arithmetic and attention is a separate phase
+  ---
+  duration_ms: 0.455604
+  type: 'test'
+  ...
+# Subtest: operational reviewer model includes confidence interaction and participant heterogeneity
+ok 295 - operational reviewer model includes confidence interaction and participant heterogeneity
+  ---
+  duration_ms: 31.703315
+  type: 'test'
+  ...
+# Subtest: main schedule has exact 6 correct / 4 wrong in every confidence stratum
+ok 296 - main schedule has exact 6 correct / 4 wrong in every confidence stratum
+  ---
+  duration_ms: 0.405109
+  type: 'test'
+  ...
+# (node:5839) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: constraint quantile calibration uses only confirmatory/robust phases and rounds upper targets upward
+ok 297 - constraint quantile calibration uses only confirmatory/robust phases and rounds upper targets upward
+  ---
+  duration_ms: 2.29374
+  type: 'test'
+  ...
+# Subtest: route access classifier keeps participant study separate from admin surface
+ok 298 - route access classifier keeps participant study separate from admin surface
+  ---
+  duration_ms: 0.294175
+  type: 'test'
+  ...
+# Subtest: human session must be in dedicated header and admin bearer cannot substitute
+ok 299 - human session must be in dedicated header and admin bearer cannot substitute
+  ---
+  duration_ms: 81.705749
+  type: 'test'
+  ...
+# Subtest: admin constraint calibration requires a prior cycle and remains fail-closed
+ok 300 - admin constraint calibration requires a prior cycle and remains fail-closed
+  ---
+  duration_ms: 44.495865
+  type: 'test'
+  ...
+# Subtest: loss_max is an active engine constraint (not a report-only field)
+ok 301 - loss_max is an active engine constraint (not a report-only field)
+  ---
+  duration_ms: 33.463106
+  type: 'test'
+  ...
+# Subtest: doctoral rigor detects confounded nuisance design
+ok 302 - doctoral rigor detects confounded nuisance design
+  ---
+  duration_ms: 1.703118
+  type: 'test'
+  ...
+# Subtest: confirmation seeds must be independent from adaptive phases
+ok 303 - confirmation seeds must be independent from adaptive phases
+  ---
+  duration_ms: 0.402284
+  type: 'test'
+  ...
+# Subtest: hard doctoral gate passes only with realized evidence
+ok 304 - hard doctoral gate passes only with realized evidence
+  ---
+  duration_ms: 0.710741
+  type: 'test'
+  ...
+# Subtest: hard doctoral gate rejects seed collision and weak realized human discrimination
+ok 305 - hard doctoral gate rejects seed collision and weak realized human discrimination
+  ---
+  duration_ms: 0.356527
+  type: 'test'
+  ...
+# (node:5861) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: migration 0024 installs durable independent replication ledger
+ok 306 - migration 0024 installs durable independent replication ledger
+  ---
+  duration_ms: 40.220875
+  type: 'test'
+  ...
+# Subtest: replication holdout scenarios are deterministic per salt and different across salts
+ok 307 - replication holdout scenarios are deterministic per salt and different across salts
+  ---
+  duration_ms: 1.038435
+  type: 'test'
+  ...
+# Subtest: doctoral rigor requires holdout lock, disjoint seeds, preregistered scenarios and fresh participant identity
+ok 308 - doctoral rigor requires holdout lock, disjoint seeds, preregistered scenarios and fresh participant identity
+  ---
+  duration_ms: 0.73772
+  type: 'test'
+  ...
+# Subtest: replication human sample rejects participants seen in the source cycle
+ok 309 - replication human sample rejects participants seen in the source cycle
+  ---
+  duration_ms: 35.98895
+  type: 'test'
+  ...
+# Subtest: doctoral rigor requires realized evidence, not settings alone
+ok 310 - doctoral rigor requires realized evidence, not settings alone
+  ---
+  duration_ms: 1.180855
+  type: 'test'
+  ...
+# Subtest: full-factor orthogonality audit can see core-factor confounding
+ok 311 - full-factor orthogonality audit can see core-factor confounding
+  ---
+  duration_ms: 0.817018
+  type: 'test'
+  ...
+# Subtest: constraint sensitivity reports feasible share across thresholds without selecting one
+ok 312 - constraint sensitivity reports feasible share across thresholds without selecting one
+  ---
+  duration_ms: 0.92645
+  type: 'test'
+  ...
+# Subtest: doctoral rigor requires runtime confirmation artifacts to attest the frozen protocol hash
+ok 313 - doctoral rigor requires runtime confirmation artifacts to attest the frozen protocol hash
+  ---
+  duration_ms: 1.744839
+  type: 'test'
+  ...
+# Subtest: confirmatory GLMM CSV preserves the preregistered trial-level columns
+ok 314 - confirmatory GLMM CSV preserves the preregistered trial-level columns
+  ---
+  duration_ms: 0.305011
+  type: 'test'
+  ...
+# Subtest: external validity defaults to internal computational claims only
+ok 315 - external validity defaults to internal computational claims only
+  ---
+  duration_ms: 0.87903
+  type: 'test'
+  ...
+# Subtest: Case B aggregate observations only raise contextual scope, not outcome validity
+ok 316 - Case B aggregate observations only raise contextual scope, not outcome validity
+  ---
+  duration_ms: 0.17568
+  type: 'test'
+  ...
+# Subtest: verified real public-payment labelled data plus hashed PASS evaluation raises outcome-validity scope
+ok 317 - verified real public-payment labelled data plus hashed PASS evaluation raises outcome-validity scope
+  ---
+  duration_ms: 0.27064
+  type: 'test'
+  ...
+# Subtest: independent external replication requires independent source and non-DCV implementation
+ok 318 - independent external replication requires independent source and non-DCV implementation
+  ---
+  duration_ms: 0.23671
+  type: 'test'
+  ...
+# Subtest: report and approval use external-validity claim gate instead of silently upgrading Case B context
+ok 319 - report and approval use external-validity claim gate instead of silently upgrading Case B context
+  ---
+  duration_ms: 1.56255
+  type: 'test'
+  ...
+# (node:5905) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: current frozen protocols declare the executable runtime contract
+ok 320 - current frozen protocols declare the executable runtime contract
+  ---
+  duration_ms: 60.468898
+  type: 'test'
+  ...
+# Subtest: legacy frozen runtime is classified as upgrade-required before compute
+ok 321 - legacy frozen runtime is classified as upgrade-required before compute
+  ---
+  duration_ms: 50.102894
+  type: 'test'
+  ...
+# Subtest: failed compute under a legacy protocol starts one fresh cycle instead of retrying forever
+ok 322 - failed compute under a legacy protocol starts one fresh cycle instead of retrying forever
+  ---
+  duration_ms: 54.792926
+  type: 'test'
+  ...
+# Subtest: advance_project repairs already-stranded UNEVALUATED candidates with protocol mismatch failures
+ok 323 - advance_project repairs already-stranded UNEVALUATED candidates with protocol mismatch failures
+  ---
+  duration_ms: 47.805142
+  type: 'test'
+  ...
+# Subtest: participant portal visibility is controlled by hidden state, not Bootstrap d-none
+ok 324 - participant portal visibility is controlled by hidden state, not Bootstrap d-none
+  ---
+  duration_ms: 1.397005
+  type: 'test'
+  ...
+# Subtest: mobile navbar uses bounded grid and hides refresh to prevent horizontal overflow
+ok 325 - mobile navbar uses bounded grid and hides refresh to prevent horizontal overflow
+  ---
+  duration_ms: 0.265853
+  type: 'test'
+  ...
+# Subtest: current cache buster is applied to all public UI assets
+ok 326 - current cache buster is applied to all public UI assets
+  ---
+  duration_ms: 0.165304
+  type: 'test'
+  ...
+# (node:5927) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: project_cycle_stats stays in sync without rescanning candidate/run tables
+ok 327 - project_cycle_stats stays in sync without rescanning candidate/run tables
+  ---
+  duration_ms: 47.722654
+  type: 'test'
+  ...
+# Subtest: automatic draft report waits while heavy compute is in flight
+ok 328 - automatic draft report waits while heavy compute is in flight
+  ---
+  duration_ms: 49.448946
+  type: 'test'
+  ...
+# Subtest: mobile/touch dashboard forces compute and projects into one bounded column
+ok 329 - mobile/touch dashboard forces compute and projects into one bounded column
+  ---
+  duration_ms: 0.844177
+  type: 'test'
+  ...
+# Subtest: mobile chart and nested cards cannot widen the document
+ok 330 - mobile chart and nested cards cannot widen the document
+  ---
+  duration_ms: 0.244953
+  type: 'test'
+  ...
+# Subtest: 0028 rebuilds project_cycle_stats with candidate_active before backfill
+ok 331 - 0028 rebuilds project_cycle_stats with candidate_active before backfill
+  ---
+  duration_ms: 0.866921
+  type: 'test'
+  ...
+# Subtest: 0027 guards partial project_cycle_stats schemas too
+ok 332 - 0027 guards partial project_cycle_stats schemas too
+  ---
+  duration_ms: 0.142661
+  type: 'test'
+  ...
+# Subtest: v0.9.4 final responsive override collapses compute deck and contains canvas
+ok 333 - v0.9.4 final responsive override collapses compute deck and contains canvas
+  ---
+  duration_ms: 0.771781
+  type: 'test'
+  ...
+# Subtest: region chart reserves a real bottom safe area for x-axis labels
+ok 334 - region chart reserves a real bottom safe area for x-axis labels
+  ---
+  duration_ms: 0.708137
+  type: 'test'
+  ...
+# Subtest: research lab snapshot uses materialized cycle stats and bounded evidence samples
+ok 335 - research lab snapshot uses materialized cycle stats and bounded evidence samples
+  ---
+  duration_ms: 0.167788
+  type: 'test'
+  ...
+# Subtest: lab polling can return 304 after one cheap campaign probe and does not reload review every render
+ok 336 - lab polling can return 304 after one cheap campaign probe and does not reload review every render
+  ---
+  duration_ms: 0.115511
+  type: 'test'
+  ...
+# Subtest: lab hot paths have dedicated D1 indexes
+ok 337 - lab hot paths have dedicated D1 indexes
+  ---
+  duration_ms: 0.108971
+  type: 'test'
+  ...
+# Subtest: region empty-state text is measured and wrapped inside the plot box
+ok 338 - region empty-state text is measured and wrapped inside the plot box
+  ---
+  duration_ms: 0.764711
+  type: 'test'
+  ...
+# Subtest: v0.10.0 detail data cards collapse to one contained column below 1400px
+ok 339 - v0.10.0 detail data cards collapse to one contained column below 1400px
+  ---
+  duration_ms: 0.847693
+  type: 'test'
+  ...
+# Subtest: v0.10.0 long status and funnel text cannot widen viewport
+ok 340 - v0.10.0 long status and funnel text cannot widen viewport
+  ---
+  duration_ms: 0.956233
+  type: 'test'
+  ...
+# Subtest: v0.10.0 cache-busts responsive assets
+ok 341 - v0.10.0 cache-busts responsive assets
+  ---
+  duration_ms: 0.107909
+  type: 'test'
+  ...
+# Subtest: report modal uses readable mobile heading and dedicated action toolbar
+ok 342 - report modal uses readable mobile heading and dedicated action toolbar
+  ---
+  duration_ms: 1.037854
+  type: 'test'
+  ...
+# Subtest: rendered report has mobile manuscript typography and full-screen safe area
+ok 343 - rendered report has mobile manuscript typography and full-screen safe area
+  ---
+  duration_ms: 0.334945
+  type: 'test'
+  ...
+# (node:6004) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: External Validation Matrix separates Synthetic/Historical/Adversarial/BIS/ECB/Human
+ok 344 - External Validation Matrix separates Synthetic/Historical/Adversarial/BIS/ECB/Human
+  ---
+  duration_ms: 45.76373
+  type: 'test'
+  ...
+# Subtest: External Validation Matrix keeps unavailable external layers as N/A and Human as HOLD (pending) rather than failure
+ok 345 - External Validation Matrix keeps unavailable external layers as N/A and Human as HOLD (pending) rather than failure
+  ---
+  duration_ms: 40.069181
+  type: 'test'
+  ...
+# Subtest: Figure 7 survival funnel uses strict cumulative PASS and exposes N/A layers safely
+ok 346 - Figure 7 survival funnel uses strict cumulative PASS and exposes N/A layers safely
+  ---
+  duration_ms: 10.359484
+  type: 'test'
+  ...
+# Subtest: External Validation Matrix preserves last valid snapshot while a new evidence revision is revalidating
+ok 347 - External Validation Matrix preserves last valid snapshot while a new evidence revision is revalidating
+  ---
+  duration_ms: 39.304832
+  type: 'test'
+  ...
+# Subtest: Figure 3 shows an explicit wait state and preserves tiny regret precision
+ok 348 - Figure 3 shows an explicit wait state and preserves tiny regret precision
+  ---
+  duration_ms: 2.725759
+  type: 'test'
+  ...
+# Subtest: GET repairs empty Matrix from stored D1 simulation runs without a G3 event
+ok 349 - GET repairs empty Matrix from stored D1 simulation runs without a G3 event
+  ---
+  duration_ms: 38.771062
+  type: 'test'
+  ...
+# Subtest: GET refreshes Matrix after a later simulation run, without replacing true evidence with invented PASS
+ok 350 - GET refreshes Matrix after a later simulation run, without replacing true evidence with invented PASS
+  ---
+  duration_ms: 42.932634
+  type: 'test'
+  ...
+# Subtest: Matrix restores stress subset evidence when validation_groups are omitted
+ok 351 - Matrix restores stress subset evidence when validation_groups are omitted
+  ---
+  duration_ms: 94.199042
+  type: 'test'
+  ...
+# Subtest: Stress scenario metrics without valid constraints are HOLD not PASS
+ok 352 - Stress scenario metrics without valid constraints are HOLD not PASS
+  ---
+  duration_ms: 49.355904
+  type: 'test'
+  ...
+# Subtest: per-candidate write-through refresh updates only the completed candidate and preserves peers
+ok 353 - per-candidate write-through refresh updates only the completed candidate and preserves peers
+  ---
+  duration_ms: 40.703128
+  type: 'test'
+  ...
+# Subtest: legacy point estimate above a constraint is HOLD, not statistically confirmed FAIL
+ok 354 - legacy point estimate above a constraint is HOLD, not statistically confirmed FAIL
+  ---
+  duration_ms: 36.964653
+  type: 'test'
+  ...
+1..354
+# tests 354
+# suites 0
+# pass 354
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 15314.960091

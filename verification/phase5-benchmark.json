@@ -1,0 +1,13 @@
+{
+  "scope": "synthetic seed registry serialization only; compact expands at execution; excludes DB and simulation",
+  "runs": 600,
+  "episodes": 180000,
+  "bytes": {
+    "expanded": 1935164,
+    "compact": 12493
+  },
+  "median_ms": {
+    "expanded": 61.45173799999998,
+    "compact": 0.04794100000003709
+  }
+}

@@ -108,7 +108,7 @@ function reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,delayBase,de
   const falseAccept=Number(stratum?.false_accept_rate??reviewer?.false_accept_rate??.08);
   const correctOverride=Number(stratum?.correct_override_rate??reviewer?.correct_override_rate??.78);
   const unnecessaryOverride=Number(stratum?.unnecessary_override_rate??reviewer?.unnecessary_override_rate??Math.min(.18,falseAccept*.5));
-  const shift=p=>{p=clamp(Number(p),.001,.999);const z=Math.log(p/(1-p))+participantEffect;return 1/(1+Math.exp(-z));};
+  const shift=p=>{if(reviewer?.audit_exact_ideal===true)return Number(p);p=clamp(Number(p),.001,.999);const z=Math.log(p/(1-p))+participantEffect;return 1/(1+Math.exp(-z));};
   let finalStop=aiStop;
   if(aiStop!==shouldStop){ if(rng()<shift(correctOverride)) finalStop=shouldStop; }
   else if(rng()<shift(unnecessaryOverride)) finalStop=!aiStop;
@@ -520,4 +520,4 @@ export async function computeRegretTable(env,projectId,preloadedRuns=null){
 }
 
 // Pure helpers exposed only for deterministic unit tests; production orchestration uses the exported CDRS functions above.
-export const __test = { replicationHoldoutScenarios,orthogonalBalancedDesign,designAudit,simulateEpisode,confidenceFor,configFrom,applyNoninferiority,finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };
+export const __test = { loadScenarios,replicationHoldoutScenarios,orthogonalBalancedDesign,designAudit,simulateEpisode,confidenceFor,configFrom,applyNoninferiority,finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };

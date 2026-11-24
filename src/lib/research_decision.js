@@ -1,3 +1,4 @@
+import {currentFinal} from './research_final.js';
 import {gridEffects,boundaryPlan} from './research_effects.js';
 import {matchedSigma,propositions,stoppingStatus,stoppingRecommendation} from './research_followup.js';
 import {all,one,run} from './db.js';
@@ -22,7 +23,7 @@ export async function researchDashboard(env,id){
  const current=!matrix.stale&&matrix.cycle===cycle&&matrix.revision===revision;const att=checks.find(x=>{const a=safeJson(x.result_json,{});return a.cycle===cycle&&a.revision===revision&&a.code_revision===env.RUNNER_CODE_REVISION&&!!env.RUNNER_CODE_REVISION;});
  const sourceTests=att?.status==='PASS'?'PASS':att?.status==='FAIL'?'FAIL':'UNVERIFIED'; const system=sourceTests==='FAIL'?'FAIL':'UNVERIFIED';
  const effects=gridEffects(contrasts);
- const stop=await stoppingStatus(env,id,cycle);
+ const stop=await stoppingStatus(env,id,cycle);const confirm=await currentFinal(env,id);
  const latest=await one(env.DB,'SELECT research_cycle,evidence_revision FROM projects WHERE id=?',[id]);if(Number(latest.research_cycle)!==cycle||Number(latest.evidence_revision)!==revision)throw Error('evidence_changed_retry');
- return {cycle,revision,system,source_tests:sourceTests,candidates:current?matrix.summary:null,candidate_basis:current?'CURRENT':'STALE',boundary_plan:boundaryPlan(contrasts),grid_effects:effects,hypotheses:Object.entries(propositions).map(([id,label])=>({id,label,status:'INCONCLUSIVE',reason:'No preregistered effect interval and independent analysis attached',...(id==='P1'?{exploratory:matchedSigma(contrasts)}:{})})),sensitivity:sensitivity(used,safeJson(cfg?.constraints_json,{})),loss_policy:safeJson(cfg?.benchmark_json,{}).loss_policy||{mode:'baseline'},protocol_hash:protocol?.protocol_hash||null,replication_status:replication.status,stopping:stop,recommendation:stoppingRecommendation(system,stop),recommendation_basis:'Budget review only; no automatic termination or confirmatory proposition claim'};
+ return {cycle,revision,confirmatory_computation:confirm,system,source_tests:sourceTests,candidates:current?matrix.summary:null,candidate_basis:current?'CURRENT':'STALE',boundary_plan:boundaryPlan(contrasts),grid_effects:effects,hypotheses:Object.entries(propositions).map(([id,label])=>({id,label,status:'INCONCLUSIVE',reason:'No preregistered effect interval and independent analysis attached',...(id==='P1'?{exploratory:matchedSigma(contrasts)}:{})})),sensitivity:sensitivity(used,safeJson(cfg?.constraints_json,{})),loss_policy:safeJson(cfg?.benchmark_json,{}).loss_policy||{mode:'baseline'},protocol_hash:protocol?.protocol_hash||null,replication_status:replication.status,stopping:stop,recommendation:stoppingRecommendation(system,stop),recommendation_basis:'Budget review only; no automatic termination or confirmatory proposition claim'};
 }

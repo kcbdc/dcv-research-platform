@@ -1,3 +1,4 @@
+import {executeFinal} from './research_final.js';
 import { claimJobs, finishJob, enqueue, enqueueOnce, enqueueMany, pruneJobs, wakeDueJobs, all, one, run, audit } from './db.js';
 import { ensureFrozenProtocol } from './rigor.js';
 import { defineProject } from './define.js';
@@ -255,6 +256,7 @@ export async function advanceProject(env,projectId){
 async function execute(env,job){
   const payload=JSON.parse(job.payload_json||'{}'); const id=job.project_id;
   switch(job.type){
+    case 'research_confirm_final': return executeFinal(env,id,payload.hash);
     case 'seed_empirical_panel': return seedBundledEmpiricalPanel(env,id);
     case 'define_project': { const r=await defineProject(env,id); if(r.status==='CONFIRM') await enqueue(env,id,'collect_project',{},20); return r; }
     case 'collect_project': { if(await isHumanFrozen(env,id)) return {skipped:'human_freeze_active'}; const r=await collectProject(env,id,{dueOnly:!!payload.refresh}); let ev=null; if(Number(r.inserted||0)+Number(r.empiricalRows||0)>0) ev=await registerEvidence(env,id,{kind:Number(r.empiricalRows||0)>0?'EMPIRICAL_EPISODE':'EXTERNAL_DATA',source:'scheduled_collector',detail:{inserted:r.inserted,empiricalRows:r.empiricalRows}}); if(ev?.deferred) return {...r,deferred:true}; if(Number(r.empiricalRows||0)>0) await enqueueOnce(env,id,'refit_empirical',{},22);

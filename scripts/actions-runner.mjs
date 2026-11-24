@@ -7,10 +7,11 @@ import {scheduleAll,processJobs} from '../src/lib/orchestrator.js';
 import {scheduleLab} from '../src/lib/lab.js';
 export async function runActions(env,{seconds=240,maxJobs=5,maxCalls=220}={}){
  const token=await acquireRunner(env);if(!token)return {status:'runner_already_active',jobs:0};
- const started=Date.now();let completed=0,failures=0,primaryError=null;
+ const started=Date.now();let completed=0,failures=0,primaryError=null,lastHeartbeat=0;
+ const beat=async()=>{if(Date.now()-lastHeartbeat>=30000){await heartbeatRunner(env,token);lastHeartbeat=Date.now();}};
  try{
   // Set-level scheduling; one claimed job at a time. The same immutable protocol/seed engine runs here.
-  await heartbeatRunner(env,token);
+  await beat();
   // Event-driven wakeups usually arrive with durable work already queued. In that case skip the
   // scheduler-wide project/source probes and start consuming immediately; the fallback cron will
   // still run scheduleAll when the queue is empty.
@@ -18,13 +19,15 @@ export async function runActions(env,{seconds=240,maxJobs=5,maxCalls=220}={}){
   const initial=due?[]:await scheduleAll(env,{process:false});
   const first=Array.isArray(initial)?initial:[];
   completed+=first.length;failures+=first.filter(r=>!r.ok).length;
+  // Worker already drives the lab independently; reserve Actions fallback before compute consumes its budget.
+  if(env.AI&&env.LAB_RUN_ON_WORKER!=='true'&&(!env.DB.remaining||env.DB.remaining>=100)){const lab=await scheduleLab(env);if(lab.error)failures++;}
   while(Date.now()-started<seconds*1000&&completed<maxJobs&&!env.RUNNER_RATE_LIMIT_DEFERRED&&(typeof env.DB.remaining==='number'?env.DB.remaining>=60:env.DB.calls<maxCalls-80)){
-   await heartbeatRunner(env,token);
+   await beat();
    const results=await processJobs(env);if(!results.length)break;
    completed+=results.filter(r=>!r.deferred).length;failures+=results.filter(r=>!r.ok&&!r.deferred).length;if(results.some(r=>r.deferred)){env.RUNNER_BUDGET_DEFERRED=true;break;}
   }
   if(typeof env.DB.remaining==='number'&&env.DB.remaining<60)env.RUNNER_BUDGET_DEFERRED=true;
-  if(!env.RUNNER_BUDGET_DEFERRED&&env.AI&&Date.now()-started<(seconds-50)*1000&&env.DB.calls<maxCalls-100){await heartbeatRunner(env,token);const lab=await scheduleLab(env);if(lab.error)failures++;}
+  if(!env.RUNNER_BUDGET_DEFERRED&&env.AI&&env.LAB_RUN_ON_WORKER==='true'&&Date.now()-started<(seconds-50)*1000&&env.DB.calls<maxCalls-100){await heartbeatRunner(env,token);const lab=await scheduleLab(env);if(lab.error)failures++;}
   let progress=null;
   if(typeof env.DB.remaining!=='number'||env.DB.remaining>0){
    const result=await env.DB.batch([

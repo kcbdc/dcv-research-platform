@@ -1,0 +1,2 @@
+import fs from 'node:fs';import {freezeConfirm,runConfirm,calibrateLoss} from '../src/lib/research_confirm.js';
+const [mode,input,output]=process.argv.slice(2);if(!input||!output)throw Error('freeze|run|calibrate input.json output.json');const data=JSON.parse(fs.readFileSync(input));const result=mode==='freeze'?await freezeConfirm(data):mode==='run'?await runConfirm(data):mode==='calibrate'?calibrateLoss(data):null;if(!result)throw Error('unknown_mode');fs.writeFileSync(output,JSON.stringify(result,null,2),{flag:'wx'});

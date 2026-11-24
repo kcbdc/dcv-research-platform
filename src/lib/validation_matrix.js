@@ -8,7 +8,7 @@ const validationStatus=v=>v==='CONFIRM'?'PASS':v==='REJECT'?'FAIL':v==='HOLD'?'H
 // Bump when the status rules change so cached matrix rows are rebuilt once from stored evidence.
 // v2: Human is evaluated for every Synthetic-passing candidate (human_screen) and phase-level
 //     non-inferiority contrasts are no longer ignored by the per-group statuses.
-export const MATRIX_RULES_VERSION=3;
+export const MATRIX_RULES_VERSION=4;
 
 // Phase-level non-inferiority (candidate vs matched K0 baseline) is stored in result.noninferiority and
 // is already part of result.classification, but validation_groups[*].classification is computed before it.
@@ -18,7 +18,7 @@ function noninferiorityGate(result){
   if(!Array.isArray(cmp)||!cmp.length)return 'PASS';
   let fail=false,hold=false;
   for(const x of cmp){
-    const lo=Number(x?.lo),hi=Number(x?.hi),lim=Number(x?.limit);
+    const lo=x?.lo==null?NaN:Number(x.lo),hi=x?.hi==null?NaN:Number(x.hi),lim=x?.limit==null?NaN:Number(x.limit);
     if(!Number.isFinite(lo)||!Number.isFinite(hi)||!Number.isFinite(lim)){hold=true;continue;}
     if(lo>lim)fail=true;else if(hi>lim)hold=true;
   }
@@ -92,6 +92,9 @@ export async function refreshValidationMatrix(env,projectId,{candidateId=null}={
     if(reviewerModelReady===null)reviewerModelReady=!!(await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,cycle,rev]));
     return reviewerModelReady;
   };
+  const fit=await one(env.DB,`SELECT action,detail_json FROM audit_log WHERE project_id=? AND action IN ('reviewer.fit.fail','reviewer.fit.hold','reviewer.fit.complete') ORDER BY created_at DESC,id DESC LIMIT 1`,[projectId]);
+  const fitDetail=safeJson(fit?.detail_json,{});
+  const humanFailed=fit?.action==='reviewer.fit.fail'&&fitDetail.cycle===cycle&&fitDetail.revision===rev;
   const ts=nowIso(),stmts=[];let pass=0,fail=0,hold=0,partial=0;
   for(const c of cands){
     const conf=safeJson(runMap.get(`${c.id}|confirmation`)?.result_json,{}),hist=safeJson(runMap.get(`${c.id}|historical`)?.result_json,{}),stress=safeJson(runMap.get(`${c.id}|stress`)?.result_json,{}),h=humanMap.get(c.id);
@@ -108,7 +111,8 @@ export async function refreshValidationMatrix(env,projectId,{candidateId=null}={
     // HOLD (insufficient human evidence), never NA and never an invented PASS. Candidates that did not pass
     // Synthetic confirmation are never sent to the human gate, so they stay NA.
     let humanDetail=null;
-    if(h){row.human_status=validationStatus(h.status);humanDetail={status:h.status,source:h.validation_type,result:safeJson(h.result_json,{})};}
+    if(humanFailed&&row.synthetic_status==='PASS'){row.human_status='FAIL';humanDetail={status:'FAIL',source:'reviewer_fit',reason:fitDetail.reason,result:fitDetail};}
+    else if(h){row.human_status=validationStatus(h.status);humanDetail={status:h.status,source:h.validation_type,result:safeJson(h.result_json,{})};}
     else if(row.synthetic_status==='PASS'){
       row.human_status='HOLD';
       humanDetail={status:'HOLD',source:'pending',reason:(await hasReviewerModel())?'HUMAN_RECOMPUTE_PENDING':'HUMAN_REVIEWER_MODEL_PENDING',result:{}};
@@ -138,7 +142,7 @@ export async function getValidationMatrix(env,projectId){
     (SELECT MAX(v.created_at) FROM validations v JOIN design_candidates c ON c.id=v.candidate_id
       WHERE v.project_id=? AND c.research_cycle=? AND v.evidence_revision=? AND v.validation_type IN ('human_recompute','human_screen')) latest_human`,
     [projectId,currentCycle,projectId,currentCycle,currentRev,projectId,currentCycle,currentRev]);
-  const cachedTime=rows.reduce((m,r)=>String(r.updated_at||'')>m?String(r.updated_at):m,'');
+  const cachedTime=rows.reduce((m,r)=>m===null||String(r.updated_at||'')<m?String(r.updated_at||''):m,null)||'';
   const newEvidence=[source?.latest_run,source?.latest_human].some(t=>String(t||'')>cachedTime);
   // Deployment upgrades may add scenario-level interpretation without changing
   // run timestamps. Rebuild a legacy NA-only cache once from stored stress evidence.

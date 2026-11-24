@@ -8,7 +8,7 @@ import { refreshValidationMatrix } from './validation_matrix.js';
 // robust-confirmed candidates get 'human_recompute'; the rest get display-only 'human_screen' (see finalize).
 export async function enqueueRecompute(env,projectId){
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(p?.research_cycle||1),rev=Number(p?.evidence_revision||0);
-  const targets=await all(env.DB,`SELECT c.id id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible' ORDER BY c.id LIMIT 500`,[projectId,cycle]);
+  const targets=await all(env.DB,`SELECT c.id id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible' ORDER BY c.id`,[projectId,cycle]);
   await enqueueMany(env,projectId,'compute_candidate',targets.map(c=>({candidate_id:c.id,phase:'recompute',cycle:0})),70);   // 루프 안 개별 enqueue → 배치
   await audit(env,projectId,'agent','recompute.queued','project',projectId,{queued:targets.length,model:'empirical_reviewer',evidence_revision:rev,scope:'confirmed_feasible'});
   return{queued:targets.length};
@@ -16,7 +16,7 @@ export async function enqueueRecompute(env,projectId){
 export async function finalizeRecompute(env,projectId){
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(p?.research_cycle||1),rev=Number(p?.evidence_revision||0);
   const ids=await all(env.DB,`SELECT c.id id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='confirmed_feasible'`,[projectId,cycle]);
-  const robust=new Set((await all(env.DB,`SELECT DISTINCT v.candidate_id id FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=? AND v.validation_type='robust' AND v.status='CONFIRM'`,[projectId,cycle])).map(x=>x.id));  // same scope as orchestrator robustConfirmed (keeps finalize/advance counts aligned)
+  const robust=new Set((await all(env.DB,`SELECT DISTINCT v.candidate_id id FROM validations v JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND c.research_cycle=? AND v.validation_type='robust' AND v.status='CONFIRM' AND v.evidence_revision=?`,[projectId,cycle,rev])).map(x=>x.id));  // same scope as orchestrator robustConfirmed (keeps finalize/advance counts aligned)
   // 후보마다 recompute 실행 1건을 조회하던 N+1 루프 → 프로젝트 단위 1회 조회 후 후보별 최신값 선택
   const runs=await all(env.DB,`SELECT candidate_id,result_json FROM simulation_runs WHERE project_id=? AND phase='recompute' AND evidence_revision=? ORDER BY created_at DESC`,[projectId,rev]);
   const latest=new Map(); for(const r of runs) if(!latest.has(r.candidate_id)) latest.set(r.candidate_id,r);

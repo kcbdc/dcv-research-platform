@@ -149,6 +149,8 @@ export async function buildThesisData(env, projectId) {
     if (v.validation_type === 'human_screen' && Number(v.evidence_revision || 0) === rev && !humanScreen.has(v.candidate_id)) humanScreen.set(v.candidate_id, v);
     if (v.validation_type === 'robust' && !robustValidation.has(v.candidate_id)) robustValidation.set(v.candidate_id, v);
   }
+  const fit=await one(env.DB,`SELECT action,detail_json FROM audit_log WHERE project_id=? AND action IN ('reviewer.fit.fail','reviewer.fit.hold','reviewer.fit.complete') ORDER BY created_at DESC,id DESC LIMIT 1`,[projectId]);
+  const fitDetail=safeJson(fit?.detail_json,{}),humanFailed=fit?.action==='reviewer.fit.fail'&&fitDetail.cycle===cycle&&fitDetail.revision===rev;
   const candidateStageSnapshot = (candId) => {
     const historicalRun = byCandPhase.get(`${candId}|historical`), syntheticRun = byCandPhase.get(`${candId}|confirmation`), stressRun = byCandPhase.get(`${candId}|stress`);
     const hr=safeJson(historicalRun?.result_json,{}),sr=safeJson(syntheticRun?.result_json,{}),stressResult=safeJson(stressRun?.result_json,{});
@@ -161,7 +163,7 @@ export async function buildThesisData(env, projectId) {
     const hv=humanValidation.get(candId)||humanScreen.get(candId),humanResult=safeJson(hv?.result_json,{}),hm=humanResult.metrics||humanResult;
     // Synthetic-confirmed but no human verdict yet = HOLD (pending human evidence), same as the Matrix API; never NA/PASS by default.
     const humanPending=!hv&&syn.code==='PASS';
-    const human = wrapStatus(humanPending?'HOLD':validationToStatusCode(hv?.status), { source:humanPending?'human_pending':humanValidation.has(candId)?'human_recompute_validation':'human_screen_validation',reason:humanPending?(rmodel&&Number(rmodel.research_cycle)===cycle&&Number(rmodel.evidence_revision)===rev?'HUMAN_RECOMPUTE_PENDING':'HUMAN_REVIEWER_MODEL_PENDING'):undefined,measurements:{count:hv?1:0,loss_mean:hm.loss_mean??null,fp_rate:hm.fp_rate??null,fn_rate:hm.fn_rate??null,review_burden:hm.review_burden??null,recovery_time:hm.recovery_time??null} });
+    const human = humanFailed&&syn.code==='PASS'?wrapStatus('FAIL',{source:'reviewer_fit',reason:fitDetail.reason}):wrapStatus(humanPending?'HOLD':validationToStatusCode(hv?.status), { source:humanPending?'human_pending':humanValidation.has(candId)?'human_recompute_validation':'human_screen_validation',reason:humanPending?(rmodel&&Number(rmodel.research_cycle)===cycle&&Number(rmodel.evidence_revision)===rev?'HUMAN_RECOMPUTE_PENDING':'HUMAN_REVIEWER_MODEL_PENDING'):undefined,measurements:{count:hv?1:0,loss_mean:hm.loss_mean??null,fp_rate:hm.fp_rate??null,fn_rate:hm.fn_rate??null,review_burden:hm.review_burden??null,recovery_time:hm.recovery_time??null} });
     return { historical: hist, synthetic: syn, adversarial: adv, bis, ecb, human };
   };
   const stageSnapshots = new Map(cands.map(c => [c.id, candidateStageSnapshot(c.id)]));
@@ -180,7 +182,7 @@ export async function buildThesisData(env, projectId) {
     const available_count = values.filter(v => v.code !== 'MISSING').length;
     const failed_count = values.filter(v => v.code === 'FAIL').length;
     const boundary_count = values.filter(v => v.code === 'HOLD').length;
-    const overall_code = failed_count ? 'FAIL' : boundary_count ? 'HOLD' : survived_count ? 'PASS' : 'MISSING';
+    const overall_code = failed_count ? 'FAIL' : boundary_count ? 'HOLD' : survived_count===STAGE_KEYS.length ? 'PASS' : survived_count ? 'HOLD' : 'MISSING';
     return {
       rank: i + 1,
       candidate_id: c.id,

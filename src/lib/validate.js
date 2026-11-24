@@ -43,7 +43,7 @@ export async function validateProject(env,projectId){
   await refreshValidationMatrix(env,projectId);
   await audit(env,projectId,'agent','validate.robust.complete','project',projectId,result);
   const rm=await one(env.DB,`SELECT id FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,cycle,rev]);
-  if(rm&&confirmed>0)await enqueue(env,projectId,'recompute_project',{},65); else if(confirmed>0)await enqueue(env,projectId,'fit_reviewer',{},60);
+  if(rm&&cands.some(c=>c.status==='confirmed_feasible'))await enqueue(env,projectId,'recompute_project',{},65); else if(cands.some(c=>c.status==='confirmed_feasible'))await enqueue(env,projectId,'fit_reviewer',{},60);
   return result;
 }
 export async function bestConfirmedCandidate(env,projectId,validationType='robust'){

@@ -83,7 +83,12 @@ export async function advanceProject(env,projectId){
   if(p.reviewer_hold_marker!==null && p.reviewer_hold_marker!==undefined){
     const model=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? UNION ALL SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending' LIMIT 1`,[projectId,Number(p.research_cycle||1),Number(p.evidence_revision||0),projectId,Number(p.research_cycle||1)]);
     if(!model){
-      if((p.reviewer_last_observed_at??'')===p.reviewer_hold_marker) return {stage:'human_review',waiting:'no_new_reviewer_observations'};
+      if((p.reviewer_last_observed_at??'')===p.reviewer_hold_marker){
+        const fit=await one(env.DB,`SELECT action,detail_json FROM audit_log WHERE project_id=? AND action IN ('reviewer.fit.fail','reviewer.fit.hold','reviewer.fit.complete') ORDER BY created_at DESC,id DESC LIMIT 1`,[projectId]);
+        if(fit?.action==='reviewer.fit.fail')return {stage:'human_review',decision:'FAIL',reason:'human_discrimination_acceptance_not_met'};
+        if(!fit||fit?.detail_json?.includes('human_sample_or_interval_incomplete'))return {stage:'human_review',waiting:'no_new_reviewer_observations'};
+        await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]);p.reviewer_hold_marker=null;
+      }
     }
   }
 
@@ -189,7 +194,7 @@ export async function advanceProject(env,projectId){
     }
   }
 
-  const valAgg=await all(env.DB,`SELECT v.validation_type t,v.status s,COUNT(*) c,COUNT(DISTINCT v.candidate_id) d FROM validations v LEFT JOIN design_candidates dc ON dc.id=v.candidate_id WHERE v.project_id=? AND dc.research_cycle=? AND (v.validation_type='robust' OR (v.validation_type IN ('human_recompute','human_screen') AND v.evidence_revision=?)) GROUP BY v.validation_type,v.status`,[projectId,cycle,rev]);
+  const valAgg=await all(env.DB,`SELECT v.validation_type t,v.status s,COUNT(*) c,COUNT(DISTINCT v.candidate_id) d FROM validations v LEFT JOIN design_candidates dc ON dc.id=v.candidate_id WHERE v.project_id=? AND dc.research_cycle=? AND v.validation_type IN ('robust','human_recompute','human_screen') AND v.evidence_revision=? GROUP BY v.validation_type,v.status`,[projectId,cycle,rev]);
   const robustRows=valAgg.filter(v=>v.t==='robust').reduce((a,v)=>a+Number(v.c||0),0);
   const robustConfirmed=Number(valAgg.find(v=>v.t==='robust'&&v.s==='CONFIRM')?.d||0);
   const humanRows=valAgg.filter(v=>v.t==='human_recompute').reduce((a,v)=>a+Number(v.c||0),0);

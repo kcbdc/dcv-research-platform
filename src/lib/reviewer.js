@@ -1,6 +1,7 @@
 import { all, one, run, audit, enqueue } from './db.js';
 import { nowIso, uid, mulberry32, quantile, safeJson } from './util.js';
 import { latestDefinition } from './define.js';
+import { refreshValidationMatrix } from './validation_matrix.js';
 import { bust } from './memo.js';
 import { selectPoolForCycle, isReplicationCycle, poolKey } from './human_pool.js';
 
@@ -16,16 +17,18 @@ function metrics(rows){
   const arr=(correct.filter(r=>Number(r.human_accept)===1).length+wrong.filter(r=>Number(r.human_accept)===0).length)/n;
   return {n:rows.length,correct_n:correct.length,wrong_n:wrong.length,appropriate_reliance_rate:arr,correct_accept_rate:correctAccept,correct_override_rate:correctOverride,false_accept_rate:falseAccept,unnecessary_override_rate:unnecessaryOverride,discrimination_delta:correctAccept-falseAccept,mean_delay:meanDelay,error_recovery_time:recoveryTime};
 }
-function clusterBootstrap(rows,B=300,seed=20260930){
-  const groups=new Map(); for(const r of rows){const k=String(r.participant_hash||'anon');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}
-  const ids=[...groups.keys()]; if(ids.length<2)return{status:'HOLD',participants:ids.length,B:0};
-  const rng=mulberry32(seed), draws=[];
-  for(let b=0;b<B;b++){
-    const sample=[];for(let i=0;i<ids.length;i++){const id=ids[Math.floor(rng()*ids.length)];sample.push(...groups.get(id));}
-    draws.push(metrics(sample));
-  }
-  const interval=k=>{const xs=draws.map(x=>Number(x[k])).filter(Number.isFinite);return{lo:quantile(xs,.025),median:quantile(xs,.5),hi:quantile(xs,.975)};};
-  return {status:'CONFIRM',participants:ids.length,B,seed,ci95:{appropriate_reliance_rate:interval('appropriate_reliance_rate'),false_accept_rate:interval('false_accept_rate'),correct_override_rate:interval('correct_override_rate'),unnecessary_override_rate:interval('unnecessary_override_rate'),discrimination_delta:interval('discrimination_delta'),mean_delay:interval('mean_delay')}};
+// Resample participant sufficient statistics, not individual trial arrays.
+export function clusterBootstrap(rows,B=300,seed=20260930){
+  const groups=new Map();
+  for(const r of rows){const k=String(r.participant_hash||'anon'),g=groups.get(k)||[0,0,0,0,0,0];
+    g[0]++; const correct=Number(r.ai_correct)===1,wrong=Number(r.ai_correct)===0,accept=Number(r.human_accept)===1;
+    if(correct){g[1]++;if(accept)g[2]++;} if(wrong){g[3]++;if(accept)g[4]++;} g[5]+=Number(r.response_ms||0);groups.set(k,g);}
+  const gs=[...groups.values()];if(gs.length<2)return {status:'HOLD',participants:gs.length,B:0};
+  const rng=mulberry32(seed),draws=[];
+  for(let b=0;b<B;b++){const s=[0,0,0,0,0,0];for(let i=0;i<gs.length;i++){const g=gs[Math.floor(rng()*gs.length)];for(let j=0;j<6;j++)s[j]+=g[j];}
+    const ca=s[2]/Math.max(1,s[1]),fa=s[4]/Math.max(1,s[3]);draws.push({appropriate_reliance_rate:(s[2]+s[3]-s[4])/s[0],false_accept_rate:fa,correct_override_rate:(s[3]-s[4])/Math.max(1,s[3]),unnecessary_override_rate:(s[1]-s[2])/Math.max(1,s[1]),discrimination_delta:ca-fa,mean_delay:s[5]/s[0]/1000});}
+  const interval=k=>{const xs=draws.map(x=>x[k]).filter(Number.isFinite);return {lo:quantile(xs,.025),median:quantile(xs,.5),hi:quantile(xs,.975)};};
+  return {status:'CONFIRM',participants:gs.length,B,seed,ci95:Object.fromEntries(Object.keys(draws[0]).map(k=>[k,interval(k)]))};
 }
 
 export function clusterBootstrapGrouped(rows,B=300){
@@ -54,7 +57,7 @@ export function fitMixedLogitApprox(rows,{iterations=220,lambda=4}={}){
  return {status:'CONFIRM',method:'penalized_random_intercept_logit_v1',n:rows.length,participants:ids.length,coefficients:{intercept:b[0],ai_correct:b[1],confidence_z:b[2],ai_correct_x_confidence:b[3]},participant_intercept_sd:sd,confidence_center:.75,confidence_scale:.2,penalty_lambda:lambda,scope:'Operational MAP approximation of the preregistered random-intercept logistic model; confirmatory publication inference should use the exported trial-level data in a full GLMM implementation.'};
 }
 export async function fitReviewerModel(env,projectId){
-  const p=await one(env.DB,`SELECT research_cycle,evidence_revision,human_pool_prior_cycles FROM projects WHERE id=?`,[projectId]);
+  const p=await one(env.DB,`SELECT research_cycle,evidence_revision,human_pool_prior_cycles,reviewer_last_observed_at FROM projects WHERE id=?`,[projectId]);
   const def=await latestDefinition(env,projectId),v=def?.content?.validation||{},protocol=String(v.human_protocol||'main_v2'),cycle=Number(p?.research_cycle||1);
   const fastMs=Number(v.human_fast_ms||800),slowMs=Number(v.human_slow_ms||60000),mainRequired=Number(v.human_main_n||30),attentionRequired=Number(v.human_attention_n||3);
   // Current-cycle, normalized trial metadata is authoritative. This prevents old-cycle rows with the
@@ -88,16 +91,21 @@ export async function fitReviewerModel(env,projectId){
   // Only one cycle per cross-cycle subject enters the pooled model.
   if(poolOn)rows=rows.map(r=>({...r,participant_hash:poolKey(r.research_cycle,r.participant_hash)}));
   const lastObserved=rows.at(-1)?.created_at??'';
+  const marker=p;
   const minParticipants=Number(v.min_human_participants||32),minCorrect=Number(v.min_human_correct_trials||300),minWrong=Number(v.min_human_wrong_trials||200),B=Math.max(300,Math.min(1000,Number(v.cluster_bootstrap_n||300)));
   const participantN=new Set(rows.map(r=>String(r.participant_hash))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;
   const gate={participants:{observed:participantN,required:minParticipants,pass:participantN>=minParticipants},correct_trials:{observed:correctN,required:minCorrect,pass:correctN>=minCorrect},wrong_trials:{observed:wrongN,required:minWrong,pass:wrongN>=minWrong}};
   const cluster=clusterBootstrap(rows,B,20261004),disc=cluster?.ci95?.discrimination_delta||null;
   const minDelta=Number(v.human_min_discrimination_delta??.15);gate.discrimination={estimate:metrics(rows).discrimination_delta,ci95:disc,required:`cluster-bootstrap lower bound >= ${minDelta}`,minimum_effect:minDelta,pass:!!disc&&Number(disc.lo)>=minDelta};
   gate.quality={excluded_participants:excludedIds.size,completed_participants:completedIds.size,protocol,pass:true,human_pool:poolStats};
-  if(!Object.values(gate).filter(x=>x&&typeof x==='object'&&'pass'in x).every(x=>x.pass)){
-    await run(env.DB,`UPDATE projects SET reviewer_hold_marker=? WHERE id=?`,[lastObserved,projectId]);
-    await audit(env,projectId,'agent','reviewer.fit.hold','project',projectId,{n:rows.length,gate,reason:'human_qc_or_discrimination_gate',cluster_bootstrap:cluster});
-    return {status:'HOLD',n:rows.length,participants:participantN,gate,cluster_bootstrap:cluster};
+  const sampleReady=gate.participants.pass&&gate.correct_trials.pass&&gate.wrong_trials.pass;
+  if(!sampleReady||!gate.discrimination.pass){
+    const status=sampleReady&&disc&&disc.lo!=null&&Number.isFinite(Number(disc.lo))?'FAIL':'HOLD';
+    const reason=status==='FAIL'?'human_discrimination_acceptance_not_met':'human_sample_or_interval_incomplete';
+    await run(env.DB,`UPDATE projects SET reviewer_hold_marker=? WHERE id=?`,[marker?.reviewer_last_observed_at??'',projectId]);
+    await audit(env,projectId,'agent',status==='FAIL'?'reviewer.fit.fail':'reviewer.fit.hold','project',projectId,{cycle,revision:Number(p?.evidence_revision||0),n:rows.length,gate,reason,cluster_bootstrap:cluster});
+    if(status==='FAIL')await refreshValidationMatrix(env,projectId);
+    return {status,n:rows.length,participants:participantN,gate,reason,cluster_bootstrap:cluster};
   }
   const point=metrics(rows),byConfidence=[...new Set(rows.map(r=>Number(r.ai_confidence)))].sort((a,b)=>a-b).map(confidence=>({confidence,...metrics(rows.filter(r=>Number(r.ai_confidence)===confidence))})),mixed=fitMixedLogitApprox(rows),model={...point,by_confidence:byConfidence,mixed_effects:mixed,participant_accept_sd:Number(mixed.participant_intercept_sd||0),participants:participantN,human_protocol:protocol,last_observed_at:lastObserved,cluster_bootstrap:cluster,sample_gate:gate,quality_control:{fast_ms:Number(v.human_fast_ms||800),slow_ms:Number(v.human_slow_ms||60000),max_fast_share:Number(v.human_max_fast_share||.30),attention_fail_max:Number(v.human_attention_fail_max||1),min_discrimination_delta:Number(v.human_min_discrimination_delta||.15),excluded_participants:excludedIds.size},analysis_plan:'Operational reviewer model fits penalized random-intercept logistic accept ~ ai_correct * confidence + (1|participant), stores confidence-stratified rates, and gates promotion with participant-cluster bootstrap plus a preregistered minimum discrimination effect. Full confirmatory GLMM inference remains reproducible from exported trial-level data.',unit_of_inference:'participant cluster'};
   model.human_pool=poolStats;
